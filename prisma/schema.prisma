@@ -1,0 +1,155 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String?
+  phone     String?  @unique
+  city      String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  wallet       Wallet?
+  policies     Policy[]
+  activityLogs ActivityLog[]
+  payouts      Payout[]
+
+  @@map("users")
+}
+
+model Wallet {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @unique @map("user_id") @db.Uuid
+  balance       Decimal  @default(0.00) @db.Decimal
+  currency      String   @default("INR")
+  lastUpdatedAt DateTime @default(now()) @updatedAt @map("last_updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("wallets")
+}
+
+model Policy {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  weekStartDate    DateTime @map("week_start_date")
+  weekEndDate      DateTime @map("week_end_date")
+  basePremium      Decimal  @map("base_premium") @db.Decimal
+  wLocMultiplier   Decimal  @map("w_loc_multiplier") @db.Decimal
+  loyaltyDiscount  Decimal  @map("loyalty_discount") @db.Decimal
+  finalPremiumPaid Decimal  @map("final_premium_paid") @db.Decimal
+  status           String   // 'active', 'expired', 'defaulted'
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("policies")
+}
+
+model ActivityLog {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @map("user_id") @db.Uuid
+  city            String?
+  date            DateTime @db.Date
+  ordersCompleted Int?     @map("orders_completed")
+  earnings        Decimal? @db.Decimal
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("activity_logs")
+}
+
+model NewsArticle {
+  id          String    @id @default(uuid()) @db.Uuid
+  city        String?
+  title       String?
+  summary     String?
+  source      String?
+  url         String?
+  publishedAt DateTime? @map("published_at")
+  fetchedAt   DateTime? @default(now()) @map("fetched_at")
+
+  signals NewsSignal[]
+
+  @@map("news_articles")
+}
+
+model WeatherMetric {
+  id                 String   @id @default(uuid()) @db.Uuid
+  city               String?
+  recordedAt         DateTime @map("recorded_at")
+  precipitationMm    Decimal? @map("precipitation_mm") @db.Decimal
+  temperatureCelsius Decimal? @map("temperature_celsius") @db.Decimal
+  aqiLevel           Int?     @map("aqi_level")
+  windGustKmh        Decimal? @map("wind_gust_kmh") @db.Decimal
+  isExtremeThreshold Boolean? @map("is_extreme_threshold")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  @@map("weather_metrics")
+}
+
+model NewsSignal {
+  id              String   @id @default(uuid()) @db.Uuid
+  articleId       String   @map("article_id") @db.Uuid
+  city            String?
+  isStrongMatch   Boolean? @map("is_strong_match")
+  matchedKeywords String[] @map("matched_keywords")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  article NewsArticle @relation(fields: [articleId], references: [id])
+
+  @@map("news_signals")
+}
+
+model DisruptionCheck {
+  id             String   @id @default(uuid()) @db.Uuid
+  city           String?
+  validNewsCount Int?     @map("valid_news_count")
+  newsStatus     Boolean? @map("news_status")
+  activityScore  Decimal? @map("activity_score") @db.Decimal
+  avgOrders      Decimal? @map("avg_orders") @db.Decimal
+  todayOrders    Int?     @map("today_orders")
+  disruption     Boolean?
+  reason         String?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  events Event[]
+
+  @@map("disruption_checks")
+}
+
+model Event {
+  id                String    @id @default(uuid()) @db.Uuid
+  city              String?
+  type              String?   
+  status            String?   
+  triggeredBy       String?   @map("triggered_by")
+  disruptionCheckId String?   @map("disruption_check_id") @db.Uuid
+  startTime         DateTime? @map("start_time")
+  endTime           DateTime? @map("end_time")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  disruptionCheck DisruptionCheck? @relation(fields: [disruptionCheckId], references: [id])
+  payouts         Payout[]
+
+  @@map("events")
+}
+
+model Payout {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  eventId   String   @map("event_id") @db.Uuid
+  amount    Decimal? @db.Decimal
+  status    String?  
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user  User  @relation(fields: [userId], references: [id])
+  event Event @relation(fields: [eventId], references: [id])
+
+  @@map("payouts")
+}

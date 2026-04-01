@@ -3,7 +3,7 @@ import { PayoutService } from '../payout/payout.service.js';
 
 export class DisruptionService {
   private payoutService: PayoutService;
-
+  
   constructor() {
     this.payoutService = new PayoutService();
   }

@@ -8,10 +8,6 @@ export class PremiumController {
     this.premiumService = new PremiumService();
   }
 
-  /**
-   * Manually trigger weekly premium renewals
-   * Used for hackathon demo and testing
-   */
   public async triggerWeeklyRenewals(req: Request, res: Response): Promise<void> {
     try {
       console.log('[PREMIUM CONTROLLER] Manual weekly renewal triggered');

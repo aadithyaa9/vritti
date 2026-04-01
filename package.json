@@ -4,10 +4,13 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "node --loader ts-node/esm src/main.ts",
-    "start": "node dist/main.js",
-    "build": "tsc"
-  },
+  "dev": "tsx watch src/main.ts", 
+  "start": "node dist/main.js",
+  "build": "tsc"
+},
+"prisma": {
+  "seed": "tsx src/seed.ts"
+},
   "type": "module",
   "dependencies": {
     "@prisma/adapter-pg": "^7.6.0",
@@ -28,6 +31,7 @@
   "devDependencies": {
     "@types/node-cron": "^3.0.11",
     "prisma": "^7.6.0",
-    "ts-node": "^10.9.2"
+    "ts-node": "^10.9.2",
+    "tsx": "^4.21.0"
   }
 }

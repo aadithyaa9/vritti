@@ -3,14 +3,18 @@ export class PayoutService {
     async executeEventPayouts(eventId, city) {
         const now = new Date();
         // 1. Find all active policies in the affected city
-        const activePolicies = await prisma.policy.findMany({
-            where: {
-                status: 'active',
-                weekStartDate: { lte: now },
-                weekEndDate: { gte: now },
-                user: { city }
-            },
-            include: { user: { include: { wallet: true } } }
+        // Inside executeEventPayouts method
+    const activePolicies = await prisma.policy.findMany({
+    where: {
+        status: 'active',
+        weekStartDate: { lte: now },
+        weekEndDate: { gte: now },
+        user: { 
+        city,
+        isDeviceSecure: true // 🛡️ ONLY pay users with verified hardware
+        }
+    },
+    include: { user: { include: { wallet: true } } }
         });
         const DAILY_PAYOUT_AMOUNT = 500.00; // Simulated median daily wage
         // 2. Execute payouts transactionally

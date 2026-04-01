@@ -1,12 +1,22 @@
 import { Router } from 'express';
 import { DisruptionController } from './modules/intelligence/disruption.controller.js';
 import { PremiumController } from './modules/premium/premium.controller.js';
+import { AuthController } from './modules/auth/auth.controller.js';
+import { FraudController } from './modules/fraud/fraud.controller.js';
 
 const router = Router();
 
 // Initialize controllers
 const disruptionController = new DisruptionController();
 const premiumController = new PremiumController();
+const authController = new AuthController();
+const fraudController = new FraudController();
+
+// Onboarding
+router.post('/api/v1/auth/register', (req, res) => authController.register(req, res));
+
+// Security Heartbeat (from edge_engine.dart)
+router.post('/api/heartbeat', (req, res) => fraudController.syncHeartbeat(req, res));
 
 // ==========================================
 // 🏥 Health Check Routes

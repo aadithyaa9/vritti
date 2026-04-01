@@ -8,11 +8,14 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid()) @db.Uuid
-  name      String?
-  phone     String?  @unique
-  city      String?
-  createdAt DateTime @default(now()) @map("created_at")
+  id              String   @id @default(uuid()) @db.Uuid
+  name            String?
+  phone           String?  @unique
+  city            String?  // Step 2: Base Work City
+  platform        String?  // Step 2: Swiggy, Zomato, etc.
+  incomeBracket   String?  // Step 3: Verified via SMS scan
+  isDeviceSecure  Boolean  @default(true) @map("is_device_secure") // For EdgeEngine
+  createdAt       DateTime @default(now()) @map("created_at")
 
   wallet       Wallet?
   policies     Policy[]

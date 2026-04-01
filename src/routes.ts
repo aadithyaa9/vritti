@@ -48,7 +48,7 @@ router.get('/api/v1/intelligence/health', (req, res) => disruptionController.hea
 
 // --- Premium & Policies ---
 router.post('/api/v1/premium/renew', (req, res) => premiumController.triggerWeeklyRenewals(req, res));
-router.post('/api/v1/premium/invest', (req, res) => premiumController.invest(req, res)); 
+// router.post('/api/v1/premium/invest', (req, res) => premiumController.invest(req, res)); 
 router.get('/api/v1/premium/policies/:userId', (req, res) => premiumController.getUserPolicies(req, res));
 router.get('/api/v1/premium/health', (req, res) => premiumController.health(req, res));
 

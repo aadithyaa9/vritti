@@ -3,89 +3,58 @@ import { DisruptionController } from './modules/intelligence/disruption.controll
 import { PremiumController } from './modules/premium/premium.controller.js';
 import { AuthController } from './modules/auth/auth.controller.js';
 import { FraudController } from './modules/fraud/fraud.controller.js';
+import { PremiumService } from './modules/premium/premium.service.js';
+import { PayoutService } from './modules/payout/payout.service.js';
+import { prisma } from './config/prisma.js';
 
 const router = Router();
-
-// Initialize controllers
 const disruptionController = new DisruptionController();
 const premiumController = new PremiumController();
 const authController = new AuthController();
 const fraudController = new FraudController();
+const premiumService = new PremiumService();
+const payoutService = new PayoutService();
 
-// Onboarding
+// --- Onboarding & Security ---
 router.post('/api/v1/auth/register', (req, res) => authController.register(req, res));
-
-// Security Heartbeat (from edge_engine.dart)
+router.post('/api/v1/auth/login', (req, res) => authController.login(req, res));
 router.post('/api/heartbeat', (req, res) => fraudController.syncHeartbeat(req, res));
 
-// ==========================================
-// 🏥 Health Check Routes
-// ==========================================
+// --- Dashboard Stats ---
+router.get('/api/v1/user/dashboard/:userId', async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const invested = await premiumService.getTotalInvested(userId);
+    const credited = await payoutService.getTotalCredited(userId);
+    const user = await prisma.user.findUnique({ 
+      where: { id: userId }, 
+      include: { wallet: true } 
+    });
+    res.json({
+      moneyInvested: invested,
+      moneyCredited: credited,
+      currentBalance: user?.wallet?.balance,
+      incomeBracket: user?.incomeBracket
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Dashboard failed" });
+  }
+});
 
+// --- Intelligence & Disruption ---
+router.post('/api/v1/intelligence/evaluate', (req, res) => disruptionController.evaluateDisruption(req, res));
+router.get('/api/v1/intelligence/history/:city', (req, res) => disruptionController.getDisruptionHistory(req, res));
+router.get('/api/v1/intelligence/health', (req, res) => disruptionController.health(req, res));
+
+// --- Premium & Policies ---
+router.post('/api/v1/premium/renew', (req, res) => premiumController.triggerWeeklyRenewals(req, res));
+router.post('/api/v1/premium/invest', (req, res) => premiumController.invest(req, res)); 
+router.get('/api/v1/premium/policies/:userId', (req, res) => premiumController.getUserPolicies(req, res));
+router.get('/api/v1/premium/health', (req, res) => premiumController.health(req, res));
+
+// --- System Health ---
 router.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'Online',
-    service: 'Vritti-Core',
-    environment: process.env.NODE_ENV || 'development',
-    timestamp: new Date().toISOString(),
-  });
-});
-
-// ==========================================
-// 🚨 Intelligence & Disruption Routes
-// ==========================================
-
-// Manual disruption evaluation (for demo)
-router.post('/api/v1/intelligence/evaluate', (req, res) => {
-  disruptionController.evaluateDisruption(req, res);
-});
-
-// Get disruption history
-router.get('/api/v1/intelligence/history/:city', (req, res) => {
-  disruptionController.getDisruptionHistory(req, res);
-});
-
-// Intelligence service health
-router.get('/api/v1/intelligence/health', (req, res) => {
-  disruptionController.health(req, res);
-});
-
-// ==========================================
-// 💳 Premium & Policy Routes
-// ==========================================
-
-// Manual weekly renewal trigger (for demo)
-router.post('/api/v1/premium/renew', (req, res) => {
-  premiumController.triggerWeeklyRenewals(req, res);
-});
-
-// Get user policies
-router.get('/api/v1/premium/policies/:userId', (req, res) => {
-  premiumController.getUserPolicies(req, res);
-});
-
-// Get premium estimate
-router.get('/api/v1/premium/estimate', (req, res) => {
-  premiumController.getPremiumEstimate(req, res);
-});
-
-// Premium service health
-router.get('/api/v1/premium/health', (req, res) => {
-  premiumController.health(req, res);
-});
-
-// ==========================================
-// 📊 Legacy Demo Routes (Backward Compat)
-// ==========================================
-
-// Hackathon demo backdoor: Direct force trigger
-router.post('/api/demo/force-trigger', (req, res) => {
-  disruptionController.evaluateDisruption(req, res);
-});
-
-// Demo: Force weekly renewals
-router.post('/api/demo/force-renewal', (req, res) => {
-  premiumController.triggerWeeklyRenewals(req, res);
+  res.status(200).json({ status: 'Online', service: 'Vritti-Core' });
 });
 
 export default router;

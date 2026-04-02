@@ -7,6 +7,11 @@ import { PremiumService } from './modules/premium/premium.service.js';
 import { PayoutService } from './modules/payout/payout.service.js';
 import { prisma } from './config/prisma.js';
 
+import { LocationController } from './modules/location/location.controller.js';
+
+// Instantiate
+const locationController = new LocationController();
+
 const router = Router();
 const disruptionController = new DisruptionController();
 const premiumController = new PremiumController();
@@ -16,8 +21,11 @@ const premiumService = new PremiumService();
 const payoutService = new PayoutService();
 
 // --- Onboarding & Security ---
-router.post('/api/v1/auth/register', (req, res) => authController.register(req, res));
-router.post('/api/v1/auth/login', (req, res) => authController.login(req, res));
+router.post('/api/v1/auth/request-otp', (req, res) => authController.requestOtp(req, res));
+router.post('/api/v1/auth/verify-otp', (req, res) => authController.verifyOtp(req, res));
+
+// Add the new location route:
+router.post('/api/v1/user/location', (req, res) => locationController.syncLocation(req, res));
 router.post('/api/heartbeat', (req, res) => fraudController.syncHeartbeat(req, res));
 
 // --- Dashboard Stats ---

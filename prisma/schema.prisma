@@ -6,15 +6,21 @@ datasource db {
   provider = "postgresql"
 
 }
-
 model User {
   id              String   @id @default(uuid()) @db.Uuid
   name            String?
   phone           String?  @unique
-  city            String?  // Step 2: Base Work City
-  platform        String?  // Step 2: Swiggy, Zomato, etc.
-  incomeBracket   String?  // Step 3: Verified via SMS scan
-  isDeviceSecure  Boolean  @default(true) @map("is_device_secure") // For EdgeEngine
+  city            String?
+  platform        String?
+  incomeBracket   String?
+  isDeviceSecure  Boolean  @default(true) @map("is_device_secure")
+  
+  // New Fields for OTP & Location
+  otpCode         String?  @map("otp_code")
+  otpExpiresAt    DateTime? @map("otp_expires_at")
+  lat             Float?
+  lng             Float?
+  
   createdAt       DateTime @default(now()) @map("created_at")
 
   wallet       Wallet?
@@ -24,7 +30,6 @@ model User {
 
   @@map("users")
 }
-
 model Wallet {
   id            String   @id @default(uuid()) @db.Uuid
   userId        String   @unique @map("user_id") @db.Uuid

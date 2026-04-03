@@ -4,28 +4,22 @@ export class PremiumService {
   private readonly BASE_PREMIUM = 150.0;
   private readonly LOYALTY_DISCOUNT = 0.1; // 10% loyalty discount
 
-  /**
-   * Calculate total premium a user has paid (invested) into the system
-   */
-  // Used for the "Money Invested" box on the app
   public async getTotalInvested(userId: string): Promise<number> {
     const result = await prisma.policy.aggregate({
       where: { userId },
-      _sum: { finalPremiumPaid: true } // Sum of all Safety SIPs
+      _sum: { finalPremiumPaid: true } 
     });
     return Number(result._sum.finalPremiumPaid || 0);
   }
 
-  /**
-   * Process weekly premium renewals for all active users
-   */
-  public async processWeeklyRenewals(): Promise<void> {
+  public async processWeeklyRenewals(): Promise<{ processed: number; success: boolean }> {
     try {
       console.log('[PREMIUM SERVICE] Starting weekly policy renewals...');
       const users = await prisma.user.findMany({
         include: { wallet: true },
       });
-
+      
+      let processed = 0;
       const nextSunday = this.getNextSunday();
       const nextSaturday = new Date(nextSunday);
       nextSaturday.setDate(nextSaturday.getDate() + 6);
@@ -57,10 +51,12 @@ export class PremiumService {
               },
             });
           });
+          processed++;
         } catch (txError) {
           console.error(`[PREMIUM FAILED] User ${user.id}:`, txError);
         }
       }
+      return { processed, success: true };
     } catch (error) {
       console.error('[PREMIUM SERVICE ERROR]', error);
       throw error;
@@ -84,7 +80,7 @@ export class PremiumService {
     });
   }
 
-  public calculatePremiumEstimate(): number {
+  public calculatePremiumEstimate(city?: string): number {
     const riskMultiplier = 1.4;
     const finalPremium = (this.BASE_PREMIUM * riskMultiplier) * (1 - this.LOYALTY_DISCOUNT);
     return parseFloat(finalPremium.toFixed(2));

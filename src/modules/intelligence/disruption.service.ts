@@ -239,7 +239,6 @@ export class DisruptionService {
         console.log(`[STEP 4] ✅ ALL CONDITIONS MET. Triggering payout...`);
         const PAYOUT_AMOUNT = 500.0;
         
-        // 🚨 FIXED: Changed from executeSingleUserPayoutWithBalance to executeSingleUserPayout
         const payoutResult = await this.payoutService.executeSingleUserPayout(
           userId, PAYOUT_AMOUNT, 'One-Touch: Edge Engine + News Scraper + Weather API'
         );

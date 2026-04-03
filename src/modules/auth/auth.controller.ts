@@ -102,7 +102,7 @@ export class AuthController {
 
   public async getUserProfile(req: Request, res: Response): Promise<void> {
     // 🚨 FIXED: Removed Array.isArray(req.params.userId) which causes Express parsing errors
-    const userId = req.params.userId; 
+    const userId = req.params.userId as string; 
 
     if (!userId) { res.status(400).json({ error: 'User ID is required' }); return; }
 

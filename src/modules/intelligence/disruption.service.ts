@@ -244,8 +244,18 @@ export class DisruptionService {
         );
 
         if (payoutResult.success) {
-          steps.push({ step: 4, label: 'Final Aggregation Engine', status: 'passed', detail: `✅ ALL CONDITIONS MET. ₹${PAYOUT_AMOUNT} credited to your Gullak wallet. New balance: ₹${payoutResult.newBalance?.toFixed(2)}.`, timestamp: ts() });
-          return { success: true, message: `Claim approved! ₹${PAYOUT_AMOUNT} has been credited to your Gullak.`, steps, payoutAmount: PAYOUT_AMOUNT, newBalance: payoutResult.newBalance };
+          // 🚨 FIXED HERE: Provided a solid fallback of 0 so TypeScript knows it's always a number
+          const finalBalance = payoutResult.newBalance || 0; 
+          
+          steps.push({ step: 4, label: 'Final Aggregation Engine', status: 'passed', detail: `✅ ALL CONDITIONS MET. ₹${PAYOUT_AMOUNT} credited to your Gullak wallet. New balance: ₹${finalBalance.toFixed(2)}.`, timestamp: ts() });
+          
+          return { 
+            success: true, 
+            message: `Claim approved! ₹${PAYOUT_AMOUNT} has been credited to your Gullak.`, 
+            steps, 
+            payoutAmount: PAYOUT_AMOUNT, 
+            newBalance: finalBalance 
+          };
         } else {
           steps.push({ step: 4, label: 'Final Aggregation Engine', status: 'failed', detail: 'Conditions met but payment processing encountered an error.', timestamp: ts() });
           return { success: false, message: 'Claim approved but payment processing failed.', steps };

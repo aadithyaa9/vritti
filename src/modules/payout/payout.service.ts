@@ -53,6 +53,59 @@ export class PayoutService {
     }
   }
 
+  // Inside PayoutService class, add this method:
+
+  public async executeSingleUserPayout(userId: string, amount: number, triggerSource: string): Promise<boolean> {
+    try {
+      const user = await prisma.user.findUnique({ where: { id: userId }, include: { wallet: true } });
+      if (!user || !user.wallet) return false;
+
+      // Create a specific event record for this isolated claim
+      const event = await prisma.event.create({
+        data: {
+          city: user.city || 'Unknown',
+          type: 'one_touch_claim',
+          status: 'resolved',
+          triggeredBy: triggerSource,
+          startTime: new Date()
+        }
+      });
+
+      await prisma.$transaction(async (tx) => {
+        // A. Credit Wallet
+        const updatedWallet = await tx.wallet.update({
+          where: { userId: user.id },
+          data: { balance: { increment: amount as any } },
+        });
+
+        // B. Update Profile Bracket
+        const totalBalance = Number(updatedWallet.balance);
+        let newBracket = "5k - 10k";
+        if (totalBalance > 15000) newBracket = "15k+ Premium";
+        
+        await tx.user.update({
+          where: { id: user.id },
+          data: { incomeBracket: newBracket }
+        });
+
+        // C. Record Payout
+        await tx.payout.create({
+          data: {
+            userId: user.id,
+            eventId: event.id,
+            amount: amount as any,
+            status: 'success',
+          },
+        });
+      });
+      console.log(`[PAYOUT SUCCESS] One-Touch payout of ₹${amount} credited for ${userId}`);
+      return true;
+    } catch (error) {
+      console.error(`[PAYOUT FAILED] One-Touch failed for ${userId}`, error);
+      return false;
+    }
+  }
+
   public async getTotalCredited(userId: string): Promise<number> {
     const result = await prisma.payout.aggregate({
       where: { userId, status: 'success' },

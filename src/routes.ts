@@ -59,7 +59,7 @@ router.post('/api/v1/premium/renew', (req, res) => premiumController.triggerWeek
 // router.post('/api/v1/premium/invest', (req, res) => premiumController.invest(req, res)); 
 router.get('/api/v1/premium/policies/:userId', (req, res) => premiumController.getUserPolicies(req, res));
 router.get('/api/v1/premium/health', (req, res) => premiumController.health(req, res));
-
+router.post('/api/v1/claims/one-touch', (req, res) => disruptionController.oneTouchClaim(req, res));
 // --- System Health ---
 router.get('/health', (req, res) => {
   res.status(200).json({ status: 'Online', service: 'Vritti-Core' });

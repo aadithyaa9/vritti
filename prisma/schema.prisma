@@ -27,7 +27,7 @@ model User {
   policies     Policy[]
   activityLogs ActivityLog[]
   payouts      Payout[]
-
+  heartbeats   Heartbeat[]
   @@map("users")
 }
 model Wallet {
@@ -161,4 +161,18 @@ model Payout {
   event Event @relation(fields: [eventId], references: [id])
 
   @@map("payouts")
+}
+
+
+model Heartbeat {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  lat       Float?
+  lng       Float?
+  status    String   // 'NORMAL' or 'FLAGGED'
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("heartbeats")
 }

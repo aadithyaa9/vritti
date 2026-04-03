@@ -34,6 +34,27 @@ export class DisruptionController {
     }
   }
 
+  public async oneTouchClaim(req: Request, res: Response): Promise<void> {
+    try {
+      const { userId, lat, lng } = req.body;
+
+      if (!userId || !lat || !lng) {
+        res.status(400).json({ error: 'userId, lat, and lng are required for One-Touch Claim' });
+        return;
+      }
+
+      const result = await this.disruptionService.processOneTouchClaim(userId, lat, lng);
+      
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result); // Return 400 if denied, so frontend can show rejection UI
+      }
+    } catch (error) {
+      console.error('[ONE-TOUCH CONTROLLER ERROR]', error);
+      res.status(500).json({ error: 'Failed to process One-Touch Claim' });
+    }
+  }
   /**
    * Get recent disruption checks for a city
    */

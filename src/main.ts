@@ -8,160 +8,180 @@ import { PremiumService } from './modules/premium/premium.service.js';
 import { IngestionService } from './modules/ingestion/ingestion.service.js';
 import routes from './routes.js';
 
-// Initialize services
+// ============================================================
+// Initialize Services
+// ============================================================
 const disruptionService = new DisruptionService();
 const premiumService = new PremiumService();
 const ingestionService = new IngestionService();
 
-// Initialize Express app
+// ============================================================
+// Express App Setup
+// ============================================================
 const app = express();
 
-// ==========================================
-// 🛡️ Middleware Stack
-// ==========================================
+app.use(helmet());
+app.use(cors({
+  origin: '*', // In production, restrict to your Flutter app's domain
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-app.use(helmet()); // Security headers
-app.use(cors()); // CORS support
-app.use(express.json()); // JSON parsing
-app.use(express.urlencoded({ extended: true })); // URL encoding
-
-// ==========================================
-// 📡 Mount Routes
-// ==========================================
-
+// ============================================================
+// Mount All Routes
+// ============================================================
 app.use(routes);
 
-// ==========================================
-// 🕒 Autonomous Cron Engine
-// ==========================================
-
-console.log('[CRON] Initializing autonomous scheduling engine...');
+// ============================================================
+// Autonomous Cron Engine
+// ============================================================
+console.log('\n[CRON] Initializing autonomous scheduling engine...');
 
 /**
- * Every 4 hours: Fetch external data (mock weather & news) for Chennai
- * 00:00, 04:00, 08:00, 12:00, 16:00, 20:00
+ * Every 4 hours: Fetch fresh weather + news data for Chennai
+ * This populates the signals that the disruption check evaluates
  */
 cron.schedule('0 */4 * * *', async () => {
   try {
-    console.log('\n🌍 [CRON - 4 HOUR] External Data Ingestion starting...');
+    console.log('\n🌍 [CRON 4H] External Data Ingestion starting for Chennai...');
     await ingestionService.fetchExternalData('Chennai');
-    console.log('✅ [CRON - 4 HOUR] External data ingestion completed\n');
+    console.log('✅ [CRON 4H] Ingestion done\n');
   } catch (error) {
-    console.error('❌ [CRON - 4 HOUR ERROR]', error);
+    console.error('❌ [CRON 4H ERROR]', error);
   }
 });
 
 /**
- * Daily at 14:00 (2:00 PM): AI Disruption Intelligence Check
- * Evaluates news signals, weather data, and platform activity for Chennai
+ * Daily at 14:00: Afternoon disruption intelligence check
  */
 cron.schedule('0 14 * * *', async () => {
   try {
-    console.log('\n🔍 [CRON - 14:00] Daily Disruption Intelligence Check starting...');
+    console.log('\n🔍 [CRON 14:00] Afternoon Disruption Check for Chennai...');
     await disruptionService.evaluateCity('Chennai');
-    console.log('✅ [CRON - 14:00] Disruption check completed\n');
+    console.log('✅ [CRON 14:00] Done\n');
   } catch (error) {
-    console.error('❌ [CRON - 14:00 ERROR]', error);
+    console.error('❌ [CRON 14:00 ERROR]', error);
   }
 });
 
 /**
- * Daily at 20:00 (8:00 PM): Evening Disruption Intelligence Check
- * Another evaluation window for real-time crisis detection
+ * Daily at 20:00: Evening disruption check
  */
 cron.schedule('0 20 * * *', async () => {
   try {
-    console.log('\n🔍 [CRON - 20:00] Evening Disruption Intelligence Check starting...');
+    console.log('\n🔍 [CRON 20:00] Evening Disruption Check for Chennai...');
     await disruptionService.evaluateCity('Chennai');
-    console.log('✅ [CRON - 20:00] Disruption check completed\n');
+    console.log('✅ [CRON 20:00] Done\n');
   } catch (error) {
-    console.error('❌ [CRON - 20:00 ERROR]', error);
+    console.error('❌ [CRON 20:00 ERROR]', error);
   }
 });
 
 /**
- * Every Saturday at 23:55: Weekly Premium Renewal
- * Calculates and deducts premiums, issues new policies for the upcoming week
+ * Every Saturday at 23:55: Weekly premium renewal
+ * Deducts premiums and issues new policies for the coming week
  */
 cron.schedule('55 23 * * 6', async () => {
   try {
-    console.log('\n💳 [CRON - SATURDAY 23:55] Weekly Policy Renewal starting...');
+    console.log('\n💳 [CRON SAT 23:55] Weekly Policy Renewal starting...');
     await premiumService.processWeeklyRenewals();
-    console.log('✅ [CRON - SATURDAY 23:55] Weekly renewals completed\n');
+    console.log('✅ [CRON SAT 23:55] Renewals done\n');
   } catch (error) {
-    console.error('❌ [CRON - SATURDAY 23:55 ERROR]', error);
+    console.error('❌ [CRON SAT 23:55 ERROR]', error);
   }
 });
 
-console.log('[CRON] Autonomous scheduling engine initialized successfully!');
-console.log('[CRON] Scheduled Tasks:');
-console.log('  ➜ Every 4 hours: External Data Ingestion');
-console.log('  ➜ Daily 14:00: Disruption Intelligence Check');
-console.log('  ➜ Daily 20:00: Evening Disruption Check');
-console.log('  ➜ Saturday 23:55: Weekly Premium Renewal Process');
-
-// ==========================================
-// 🚀 Server Startup
-// ==========================================
-
+// ============================================================
+// Start Server
+// ============================================================
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 const server = app.listen(PORT, () => {
-  console.log(`\n${'='.repeat(60)}`);
-  console.log('🛡️  VRITTI CORE ENGINE - PARAMETRIC MICRO-INSURANCE PLATFORM');
-  console.log(`${'='.repeat(60)}`);
-  console.log(`📍 Environment: ${NODE_ENV.toUpperCase()}`);
-  console.log(`🚀 Server Running: http://localhost:${PORT}`);
-  console.log(`⏰ Started: ${new Date().toISOString()}`);
-  console.log(`${'='.repeat(60)}\n`);
+  const border = '='.repeat(65);
+  console.log(`\n${border}`);
+  console.log('🛡️   VRITTI CORE ENGINE  —  Parametric Micro-Insurance Platform');
+  console.log(border);
+  console.log(`📍  Environment : ${NODE_ENV.toUpperCase()}`);
+  console.log(`🚀  Server      : http://localhost:${PORT}`);
+  console.log(`⏰  Started     : ${new Date().toISOString()}`);
+  console.log(border);
 
-  // Log available endpoints
-  console.log('📚 Available Endpoints:');
-  console.log('  Health & Status:');
-  console.log('    GET  /health');
-  console.log('    GET  /api/v1/intelligence/health');
-  console.log('    GET  /api/v1/premium/health');
-  console.log('\n  Intelligence & Disruption:');
-  console.log('    POST /api/v1/intelligence/evaluate          (Manual trigger - Demo)');
-  console.log('    GET  /api/v1/intelligence/history/:city     (View disruption history)');
-  console.log('\n  Premium & Policies:');
-  console.log('    POST /api/v1/premium/renew                  (Manual trigger - Demo)');
-  console.log('    GET  /api/v1/premium/policies/:userId       (View user policies)');
-  console.log('    GET  /api/v1/premium/estimate               (Premium estimate)');
-  console.log('\n  Demo/Backdoor:');
-  console.log('    POST /api/demo/force-trigger                (Legacy compatibility)');
-  console.log('    POST /api/demo/force-renewal                (Legacy compatibility)');
-  console.log(`\n${'='.repeat(60)}\n`);
+  console.log('\n📚 ENDPOINTS:\n');
+
+  console.log('  🔐 AUTH');
+  console.log('     POST  /api/v1/auth/request-otp         → Request OTP (sign up or sign in)');
+  console.log('     POST  /api/v1/auth/verify-otp           → Verify OTP + create account');
+  console.log('     GET   /api/v1/auth/profile/:userId      → Refresh user profile\n');
+
+  console.log('  📍 LOCATION & EDGE ENGINE');
+  console.log('     POST  /api/v1/user/location             → Sync GPS coordinates');
+  console.log('     POST  /api/heartbeat                    → Edge Engine sensor heartbeat');
+  console.log('     GET   /api/v1/user/heartbeat/:userId    → Poll fraud status indicator\n');
+
+  console.log('  📊 DASHBOARD');
+  console.log('     GET   /api/v1/user/dashboard/:userId    → All dashboard stats\n');
+
+  console.log('  🔍 INTELLIGENCE');
+  console.log('     POST  /api/v1/intelligence/evaluate     → Manual city evaluation');
+  console.log('     GET   /api/v1/intelligence/history/:city');
+  console.log('     GET   /api/v1/intelligence/status/:city → Live city disruption status\n');
+
+  console.log('  🚨 CLAIMS');
+  console.log('     POST  /api/v1/claims/one-touch          → One-Touch Claim (demo centrepiece)\n');
+
+  console.log('  💳 PREMIUM');
+  console.log('     POST  /api/v1/premium/renew             → Manual weekly renewal');
+  console.log('     GET   /api/v1/premium/policies/:userId');
+  console.log('     GET   /api/v1/premium/estimate?city=\n');
+
+  console.log('  💸 PAYOUTS');
+  console.log('     GET   /api/v1/payouts/:userId           → Payout history\n');
+
+  console.log('  🧪 DEMO BACKDOORS');
+  console.log('     POST  /api/demo/force-trigger           → Force disruption evaluation');
+  console.log('     POST  /api/demo/force-renewal           → Force weekly renewal');
+  console.log('     POST  /api/demo/seed-heartbeat          → Seed FLAGGED/NORMAL heartbeat\n');
+
+  console.log('  🏥 HEALTH');
+  console.log('     GET   /health\n');
+
+  console.log(border);
+  console.log('⏱️  CRON SCHEDULE:');
+  console.log('     Every 4 hours  → External Data Ingestion (weather + news)');
+  console.log('     Daily 14:00    → Afternoon Disruption Check');
+  console.log('     Daily 20:00    → Evening Disruption Check');
+  console.log('     Saturday 23:55 → Weekly Premium Renewal');
+  console.log(`${border}\n`);
 });
 
-// ==========================================
-// 🛑 Graceful Shutdown
-// ==========================================
-
+// ============================================================
+// Graceful Shutdown
+// ============================================================
 process.on('SIGTERM', () => {
-  console.log('\n[SHUTDOWN] SIGTERM received. Gracefully shutting down...');
+  console.log('\n[SHUTDOWN] SIGTERM received. Closing server gracefully...');
   server.close(() => {
-    console.log('[SHUTDOWN] Server closed. Exiting process.');
+    console.log('[SHUTDOWN] Server closed. Goodbye.');
     process.exit(0);
   });
 });
 
 process.on('SIGINT', () => {
-  console.log('\n[SHUTDOWN] SIGINT received. Gracefully shutting down...');
+  console.log('\n[SHUTDOWN] SIGINT received. Closing server gracefully...');
   server.close(() => {
-    console.log('[SHUTDOWN] Server closed. Exiting process.');
+    console.log('[SHUTDOWN] Server closed. Goodbye.');
     process.exit(0);
   });
 });
 
-// Error handling
 process.on('uncaughtException', (error) => {
-  console.error('[FATAL ERROR] Uncaught exception:', error);
+  console.error('[FATAL] Uncaught exception:', error);
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason) => {
-  console.error('[FATAL ERROR] Unhandled rejection:', reason);
+  console.error('[FATAL] Unhandled rejection:', reason);
   process.exit(1);
 });

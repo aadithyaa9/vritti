@@ -9,8 +9,8 @@ export class DisruptionController {
   }
 
   /**
-   * Manually trigger disruption evaluation for a city
-   * Used for hackathon demo and testing
+   * Manually trigger city-wide disruption evaluation
+   * Used for hackathon demo and cron fallback
    */
   public async evaluateDisruption(req: Request, res: Response): Promise<void> {
     try {
@@ -21,12 +21,13 @@ export class DisruptionController {
         return;
       }
 
-      console.log(`[DISRUPTION CONTROLLER] Evaluating disruption for ${city}`);
+      console.log(`[DISRUPTION CONTROLLER] Manual evaluation triggered for ${city}`);
       await this.disruptionService.evaluateCity(city);
 
       res.status(200).json({
-        message: `Disruption evaluation completed for ${city}. Check logs for payout execution.`,
+        message: `Disruption evaluation completed for ${city}. Check server logs for full pipeline output.`,
         city,
+        timestamp: new Date().toISOString(),
       });
     } catch (error) {
       console.error('[DISRUPTION CONTROLLER ERROR]', error);
@@ -34,33 +35,44 @@ export class DisruptionController {
     }
   }
 
+  /**
+   * One-Touch Claim endpoint
+   * Returns step-by-step verification log so frontend can render the terminal UI
+   */
   public async oneTouchClaim(req: Request, res: Response): Promise<void> {
     try {
       const { userId, lat, lng } = req.body;
 
-      if (!userId || !lat || !lng) {
-        res.status(400).json({ error: 'userId, lat, and lng are required for One-Touch Claim' });
+      if (!userId || lat === undefined || lng === undefined) {
+        res.status(400).json({
+          error: 'userId, lat, and lng are all required for One-Touch Claim',
+        });
         return;
       }
 
-      const result = await this.disruptionService.processOneTouchClaim(userId, lat, lng);
-      
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(400).json(result); // Return 400 if denied, so frontend can show rejection UI
-      }
+      const result = await this.disruptionService.processOneTouchClaim(
+        userId,
+        Number(lat),
+        Number(lng)
+      );
+
+      // Return 200 always — success/failure is communicated in the result body
+      // The frontend reads result.success to decide what to show
+      res.status(200).json(result);
     } catch (error) {
       console.error('[ONE-TOUCH CONTROLLER ERROR]', error);
       res.status(500).json({ error: 'Failed to process One-Touch Claim' });
     }
   }
+
   /**
-   * Get recent disruption checks for a city
+   * Get disruption check history for a city
    */
   public async getDisruptionHistory(req: Request, res: Response): Promise<void> {
     try {
-      const city = Array.isArray(req.params.city) ? req.params.city[0] : req.params.city;
+      const city = Array.isArray(req.params['city'])
+        ? req.params['city'][0]
+        : req.params['city'];
 
       if (!city) {
         res.status(400).json({ error: 'City parameter is required' });
@@ -73,6 +85,7 @@ export class DisruptionController {
         city,
         checks: disruptionChecks,
         count: disruptionChecks.length,
+        timestamp: new Date().toISOString(),
       });
     } catch (error) {
       console.error('[DISRUPTION CONTROLLER ERROR]', error);
@@ -81,7 +94,29 @@ export class DisruptionController {
   }
 
   /**
-   * Health check for disruption service
+   * Get current city disruption status — used by frontend dashboard polling
+   */
+  public async getCityStatus(req: Request, res: Response): Promise<void> {
+    try {
+      const city = Array.isArray(req.params['city'])
+        ? req.params['city'][0]
+        : req.params['city'];
+
+      if (!city) {
+        res.status(400).json({ error: 'City parameter is required' });
+        return;
+      }
+
+      const status = await this.disruptionService.getCityStatus(city);
+      res.status(200).json(status);
+    } catch (error) {
+      console.error('[CITY STATUS ERROR]', error);
+      res.status(500).json({ error: 'Failed to retrieve city status' });
+    }
+  }
+
+  /**
+   * Health check
    */
   public async health(req: Request, res: Response): Promise<void> {
     res.status(200).json({

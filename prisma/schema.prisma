@@ -6,28 +6,30 @@ datasource db {
   provider = "postgresql"
 
 }
-model User {
-  id              String   @id @default(uuid()) @db.Uuid
-  name            String?
-  phone           String?  @unique
-  city            String?
-  platform        String?
-  incomeBracket   String?
-  isDeviceSecure  Boolean  @default(true) @map("is_device_secure")
-  
-  // New Fields for OTP & Location
-  otpCode         String?  @map("otp_code")
-  otpExpiresAt    DateTime? @map("otp_expires_at")
-  lat             Float?
-  lng             Float?
-  
-  createdAt       DateTime @default(now()) @map("created_at")
 
-  wallet       Wallet?
-  policies     Policy[]
-  activityLogs ActivityLog[]
-  payouts      Payout[]
-  heartbeats   Heartbeat[]
+model User {
+  id                String    @id @default(uuid()) @db.Uuid
+  name              String?
+  phone             String?   @unique
+  city              String?
+  platform          String?
+  incomeBracket     String?
+  isDeviceSecure    Boolean   @default(true) @map("is_device_secure")
+  backgroundConsent Boolean   @default(false) @map("background_consent") // 🆕 explicit consent
+  
+  otpCode           String?   @map("otp_code")
+  otpExpiresAt      DateTime? @map("otp_expires_at")
+  lat               Float?
+  lng               Float?
+  
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  wallet            Wallet?
+  policies          Policy[]
+  activityLogs      ActivityLog[]
+  payouts           Payout[]
+  heartbeats        Heartbeat[] // 🆕 relation to Edge Engine
+
   @@map("users")
 }
 model Wallet {

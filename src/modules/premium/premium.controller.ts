@@ -11,10 +11,11 @@ export class PremiumController {
   public async triggerWeeklyRenewals(req: Request, res: Response): Promise<void> {
     try {
       console.log('[PREMIUM CONTROLLER] Manual weekly renewal triggered');
-      await this.premiumService.processWeeklyRenewals();
+      const result = await this.premiumService.processWeeklyRenewals();
 
       res.status(200).json({
-        message: 'Weekly policy renewals completed successfully.',
+        message: 'Weekly policy renewals completed.',
+        ...result,
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
@@ -23,12 +24,11 @@ export class PremiumController {
     }
   }
 
-  /**
-   * Get active policies for a user
-   */
   public async getUserPolicies(req: Request, res: Response): Promise<void> {
     try {
-      const userId = Array.isArray(req.params.userId) ? req.params.userId[0] : req.params.userId;
+      const userId = Array.isArray(req.params['userId'])
+        ? req.params['userId'][0]
+        : req.params['userId'];
 
       if (!userId) {
         res.status(400).json({ error: 'User ID is required' });
@@ -48,18 +48,19 @@ export class PremiumController {
     }
   }
 
-  /**
-   * Get premium estimate
-   */
   public async getPremiumEstimate(req: Request, res: Response): Promise<void> {
     try {
-      const estimate = this.premiumService.calculatePremiumEstimate();
+      const city =
+        typeof req.query['city'] === 'string' ? req.query['city'] : 'Chennai';
+      const estimate = this.premiumService.calculatePremiumEstimate(city);
 
       res.status(200).json({
         basePremium: 150.0,
         estimatedFinalPremium: estimate,
         currency: 'INR',
-        description: 'Average premium after risk multiplier and loyalty discount',
+        city,
+        description:
+          'Weekly Safety SIP premium after city risk multiplier and 10% loyalty discount',
       });
     } catch (error) {
       console.error('[PREMIUM CONTROLLER ERROR]', error);
@@ -67,9 +68,6 @@ export class PremiumController {
     }
   }
 
-  /**
-   * Health check for premium service
-   */
   public async health(req: Request, res: Response): Promise<void> {
     res.status(200).json({
       status: 'healthy',

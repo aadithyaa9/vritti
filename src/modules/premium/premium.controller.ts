@@ -12,7 +12,6 @@ export class PremiumController {
     try {
       console.log('[PREMIUM CONTROLLER] Manual weekly renewal triggered');
       const result = await this.premiumService.processWeeklyRenewals();
-
       res.status(200).json({
         message: 'Weekly policy renewals completed.',
         ...result,
@@ -30,38 +29,51 @@ export class PremiumController {
         ? req.params['userId'][0]
         : req.params['userId'];
 
-      if (!userId) {
-        res.status(400).json({ error: 'User ID is required' });
-        return;
-      }
+      if (!userId) { res.status(400).json({ error: 'User ID is required' }); return; }
 
       const policies = await this.premiumService.getUserActivePolicies(userId);
-
-      res.status(200).json({
-        userId,
-        policies,
-        count: policies.length,
-      });
+      res.status(200).json({ userId, policies, count: policies.length });
     } catch (error) {
       console.error('[PREMIUM CONTROLLER ERROR]', error);
       res.status(500).json({ error: 'Failed to retrieve policies' });
     }
   }
 
+  /**
+   * GET /api/v1/premium/estimate?city=Chennai&userId=<uuid>
+   *
+   * With userId  → ML-powered personalised quote from pricing engine
+   * Without userId → static fallback estimate
+   */
   public async getPremiumEstimate(req: Request, res: Response): Promise<void> {
     try {
       const city =
         typeof req.query['city'] === 'string' ? req.query['city'] : 'Chennai';
-      const estimate = this.premiumService.calculatePremiumEstimate(city);
+      const userId =
+        typeof req.query['userId'] === 'string' ? req.query['userId'] : null;
 
-      res.status(200).json({
-        basePremium: 150.0,
-        estimatedFinalPremium: estimate,
-        currency: 'INR',
-        city,
-        description:
-          'Weekly Safety SIP premium after city risk multiplier and 10% loyalty discount',
-      });
+      if (userId) {
+        const estimate = await this.premiumService.calculatePremiumEstimateForUser(userId, city);
+        res.status(200).json({
+          ...estimate,
+          description:
+            estimate.source === 'engine'
+              ? 'ML-powered personalised premium via dynamic pricing engine'
+              : 'Fallback estimate — pricing engine unavailable',
+        });
+      } else {
+        const staticEstimate = this.premiumService.calculatePremiumEstimate(city);
+        res.status(200).json({
+          basePremium: 150.0,
+          estimatedFinalPremium: staticEstimate,
+          wRiskScore: null,
+          rAlertMultiplier: null,
+          source: 'static',
+          currency: 'INR',
+          city,
+          description: 'Static estimate — provide ?userId= for ML-powered personalised quote',
+        });
+      }
     } catch (error) {
       console.error('[PREMIUM CONTROLLER ERROR]', error);
       res.status(500).json({ error: 'Failed to calculate premium estimate' });

@@ -34,10 +34,12 @@ export interface PricingEngineRequest {
 
 export interface PricingEngineResponse {
   rider_id: string;
-  predicted_premium: number;
-  w_risk_score: number;
-  base_premium: number;
-  final_premium: number;
+  predicted_premium?: number;
+  final_premium?: number;
+  premium_final_inr?: number; // Mapped from Python Engine
+  w_risk_score?: number;
+  w_risk?: number;            // Mapped from Python Engine
+  base_premium?: number;
   risk_tier?: string;
   [key: string]: unknown;
 }
@@ -49,7 +51,8 @@ export interface PricingEngineBatchResponse {
 
 export interface RAlertResponse {
   zone_id: string;
-  r_alert_multiplier: number;
+  r_alert_multiplier?: number;
+  r_alert?: number;           // Mapped from Python Engine
   imd_level: number;
   max_temp: number;
   [key: string]: unknown;
@@ -120,7 +123,6 @@ export class PricingEngineService {
 
   // ----------------------------------------------------------
   // GET /r_alert/{zone_id}
-  // Accepts raw zoneId or falls back to resolving city name
   // ----------------------------------------------------------
   public async getRAlert(
     cityOrZoneId: string,
@@ -136,7 +138,9 @@ export class PricingEngineService {
         params: { imd_level: imdLevel, max_temp: maxTemp },
         timeout: this.TIMEOUT_MS,
       });
-      console.log(`[PRICING ENGINE] R-Alert for zone ${zoneId}: multiplier=${res.data.r_alert_multiplier}`);
+      
+      const multiplier = res.data.r_alert ?? res.data.r_alert_multiplier ?? 1.0;
+      console.log(`[PRICING ENGINE] R-Alert for zone ${zoneId}: multiplier=${multiplier}`);
       return res.data;
     } catch (err) {
       this.logError(`[PRICING ENGINE] R-Alert failed for zone ${zoneId}:`, err);
@@ -154,11 +158,9 @@ export class PricingEngineService {
       const res = await axios.post<PricingEngineResponse>(`${this.BASE_URL}/predict`, payload, {
         timeout: this.TIMEOUT_MS,
       });
-      console.log(
-        `[PRICING ENGINE] /predict → rider=${payload.rider_id} | premium=${
-          res.data.final_premium ?? res.data.predicted_premium
-        }`
-      );
+      
+      const loggedPremium = res.data.premium_final_inr ?? res.data.final_premium ?? res.data.predicted_premium;
+      console.log(`[PRICING ENGINE] /predict → rider=${payload.rider_id} | premium=${loggedPremium}`);
       return res.data;
     } catch (err) {
       this.logError('[PRICING ENGINE] /predict failed:', err);
@@ -212,7 +214,6 @@ export class PricingEngineService {
 
       if (!user) return null;
 
-      // Prioritize explicit overrides to keep DB payload in sync with requests
       const city = cityOverride ?? user.city ?? 'Chennai';
       const zoneId = CITY_TO_ZONE_ID[city] ?? `${city.toLowerCase()}_central`;
 
@@ -224,8 +225,8 @@ export class PricingEngineService {
 
       const earningsArr = recentLogs.map((l) => Number(l.earnings ?? 0));
       const mean = earningsArr.length ? earningsArr.reduce((a, b) => a + b, 0) / earningsArr.length : 500;
-      const maxE = Math.max(...earningsArr.length > 0 ? earningsArr : [mean], mean);
-      const minE = Math.min(...earningsArr.length > 0 ? earningsArr : [mean], mean);
+      const maxE = Math.max(...(earningsArr.length > 0 ? earningsArr : [mean]), mean);
+      const minE = Math.min(...(earningsArr.length > 0 ? earningsArr : [mean]), mean);
       const earningsVolatilityIndex = mean > 0 ? (maxE - minE) / mean : 0.3;
 
       const claimHistoryScore = Math.min(user.payouts.length / 10, 1.0);
@@ -241,11 +242,9 @@ export class PricingEngineService {
       const aqi = weatherOverride?.aqi ?? Number(latestWeather?.aqiLevel ?? 50);
       const imdLevel = weatherOverride?.imd_level ?? 0;
 
-      // Safely stringify to prevent crash if enum/null
       let tier = 'silver';
       if (String(user.incomeBracket || '').includes('15k')) tier = 'gold';
 
-      // Replaces dictionary to safely handle lowercase/unmapped edge cases natively
       const platform = user.platform ? user.platform.toLowerCase() : 'swiggy';
 
       const payload: PricingEngineRequest = {
@@ -284,7 +283,6 @@ export class PricingEngineService {
 
   // ----------------------------------------------------------
   // High-level: get dynamic premium for one user
-  // Always falls back to BASE_PREMIUM if engine is unreachable
   // ----------------------------------------------------------
   public async getDynamicPremium(
     userId: string,
@@ -308,22 +306,23 @@ export class PricingEngineService {
       const payload = await this.buildPayloadForUser(userId, undefined, city);
       if (!payload) return FALLBACK;
 
-      // Pass the payload's specific weather values into the R-Alert to trigger correctly
       const rAlert = await this.getRAlert(
         payload.home_zone_id,
         payload.imd_alert_level_forecast,
         payload.max_temp_forecast
       );
-      const rAlertMultiplier = rAlert?.r_alert_multiplier ?? 1.0;
+      
+      const rAlertMultiplier = rAlert?.r_alert ?? rAlert?.r_alert_multiplier ?? 1.0;
 
       const prediction = await this.predictSingle(payload);
       if (!prediction) return FALLBACK;
 
-      const rawPremium = prediction.final_premium ?? prediction.predicted_premium ?? this.BASE_PREMIUM;
+      const rawPremium = prediction.premium_final_inr ?? prediction.final_premium ?? prediction.predicted_premium ?? this.BASE_PREMIUM;
+      const wRisk = prediction.w_risk ?? prediction.w_risk_score ?? 0.83;
 
       return {
         finalPremium: parseFloat((rawPremium * rAlertMultiplier).toFixed(2)),
-        wRiskScore: prediction.w_risk_score ?? 0.83,
+        wRiskScore: wRisk,
         rAlertMultiplier,
         source: 'engine',
         engineResponse: prediction,
@@ -335,7 +334,7 @@ export class PricingEngineService {
   }
 
   // ----------------------------------------------------------
-  // Batch: all users in a city — single /predict/batch call
+  // Batch: all users in a city
   // ----------------------------------------------------------
   public async getDynamicPremiumsBatch(
     userIds: string[],
@@ -361,19 +360,17 @@ export class PricingEngineService {
 
       if (payloads.length === 0) return resultMap;
 
-      // Extract unified weather params from the batch for the City R-Alert
       const firstPayload = payloads[0]!;
       const rAlert = await this.getRAlert(
         city,
         firstPayload.imd_alert_level_forecast,
         firstPayload.max_temp_forecast
       );
-      const rAlertMultiplier = rAlert?.r_alert_multiplier ?? 1.0;
+      const rAlertMultiplier = rAlert?.r_alert ?? rAlert?.r_alert_multiplier ?? 1.0;
 
       const batchResult = await this.predictBatch(payloads);
       if (!batchResult) return resultMap;
 
-      // Safer unwrapping behavior handles varying JSON responses 
       const predictions: PricingEngineResponse[] =
         batchResult.predictions && Array.isArray(batchResult.predictions)
           ? batchResult.predictions
@@ -381,10 +378,13 @@ export class PricingEngineService {
 
       for (const pred of predictions) {
         if (!pred.rider_id) continue;
-        const rawPremium = pred.final_premium ?? pred.predicted_premium ?? this.BASE_PREMIUM;
+        
+        const rawPremium = pred.premium_final_inr ?? pred.final_premium ?? pred.predicted_premium ?? this.BASE_PREMIUM;
+        const wRisk = pred.w_risk ?? pred.w_risk_score ?? 0.83;
+        
         resultMap.set(pred.rider_id, {
           finalPremium: parseFloat((rawPremium * rAlertMultiplier).toFixed(2)),
-          wRiskScore: pred.w_risk_score ?? 0.83,
+          wRiskScore: wRisk,
           rAlertMultiplier,
         });
       }

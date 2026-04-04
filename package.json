@@ -4,10 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-  "dev": "tsx watch src/main.ts", 
-  "start": "node dist/main.js",
-  "build": "tsc"
-},
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "build": "tsc",
+    "clean": "rm -rf dist && find src -name '*.js' -delete && find src -name '*.d.ts' -delete && find src -name '*.js.map' -delete && find . -maxdepth 1 -name '*.js' -delete && find . -maxdepth 1 -name '*.d.ts' -delete && find . -maxdepth 1 -name '*.js.map' -delete",
+    "build-production": "npm run clean && npm run build"
+  },
 "prisma": {
   "seed": "tsx src/seed.ts"
 },

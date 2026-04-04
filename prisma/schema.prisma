@@ -30,6 +30,7 @@ model User {
   payouts           Payout[]
   heartbeats        Heartbeat[] // 🆕 relation to Edge Engine
 
+  notifications     Notification[]
   @@map("users")
 }
 model Wallet {
@@ -172,9 +173,25 @@ model Heartbeat {
   lat       Float?
   lng       Float?
   status    String   // 'NORMAL' or 'FLAGGED'
+  speed     Float?
+  maeScore  Float?   @map("mae_score")
+  sensors   Json?    // Stores { ax, ay, az, gx, gy, gz }
   createdAt DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id])
 
   @@map("heartbeats")
+}
+
+model Notification {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  title     String
+  message   String
+  type      String   // 'SUCCESS', 'INFO', 'WARNING', 'ERROR'
+  timestamp DateTime @default(now()) @map("timestamp")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("notifications")
 }

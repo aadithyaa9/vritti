@@ -27,15 +27,9 @@ export class FraudController {
       lat,
       lng,
       status,
-      // Sensor data fields (stored for display in frontend Edge Engine div)
-      accelX,
-      accelY,
-      accelZ,
-      gyroX,
-      gyroY,
-      gyroZ,
       speed,
       maeScore,
+      sensors,
     } = req.body;
 
     if (!userId || !status) {
@@ -43,12 +37,11 @@ export class FraudController {
       return;
     }
 
-    if (status !== 'NORMAL' && status !== 'FLAGGED') {
-      res.status(400).json({ error: 'status must be NORMAL or FLAGGED' });
-      return;
-    }
-
     try {
+      // Map contract status to internal status if necessary
+      // Contract: VERIFIED -> NORMAL, FRAUD_FLAG -> FLAGGED (or just keep them)
+      // Let's keep them as passed from contract for maximum flexibility.
+      
       // Save heartbeat with all available sensor data
       const heartbeat = await prisma.heartbeat.create({
         data: {
@@ -56,6 +49,9 @@ export class FraudController {
           lat: lat ?? null,
           lng: lng ?? null,
           status,
+          speed: speed !== undefined ? Number(speed) : null,
+          maeScore: maeScore !== undefined ? Number(maeScore) : null,
+          sensors: sensors || null,
         },
       });
 
@@ -68,17 +64,11 @@ export class FraudController {
       }
 
       console.log(
-        `[EDGE ENGINE] Heartbeat #${heartbeat.id.slice(0, 8)} | User: ${userId.slice(0, 8)}... | Status: ${status} | MAE: ${maeScore ?? 'N/A'} | Speed: ${speed ?? 'N/A'} km/h`
+        `[TELEMETRY] Heartbeat #${heartbeat.id.slice(0, 8)} | User: ${userId.slice(0, 8)}... | Status: ${status} | MAE: ${maeScore ?? 'N/A'} | Speed: ${speed ?? 'N/A'} km/h`
       );
 
-      if (status === 'FLAGGED') {
-        console.log(
-          `  ⚠️  FLAGGED: accel=[${accelX ?? 0}, ${accelY ?? 0}, ${accelZ ?? 0}] gyro=[${gyroX ?? 0}, ${gyroY ?? 0}, ${gyroZ ?? 0}]`
-        );
-      }
-
       res.status(200).json({
-        message: 'Physical integrity synced',
+        message: 'Telemetry synced successfully',
         heartbeatId: heartbeat.id,
         status,
         timestamp: heartbeat.createdAt.toISOString(),

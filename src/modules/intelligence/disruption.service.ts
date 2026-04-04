@@ -1,12 +1,15 @@
 import axios from "axios";
 import { prisma } from "../../config/prisma.js";
 import { PayoutService } from "../payout/payout.service.js";
+import { NotificationService } from "../notification/notification.service.js";
 
 export class DisruptionService {
   private payoutService: PayoutService;
+  private notificationService: NotificationService;
 
   constructor() {
     this.payoutService = new PayoutService();
+    this.notificationService = new NotificationService();
   }
 
   public async processOneTouchClaim(userId: string, lat: number, lng: number) {
@@ -14,7 +17,7 @@ export class DisruptionService {
     console.log(`User: ${userId} | Lat: ${lat}, Lng: ${lng}`);
 
     try {
-      // 1. Fetch User and their Active Policy (Status check should be lowercase 'active' to match your DB)
+      // 1. Fetch User and their Active Policy
       const user = await prisma.user.findUnique({
         where: { id: userId },
         include: { policies: { where: { status: "active" } } },
@@ -26,8 +29,10 @@ export class DisruptionService {
       }
 
       if (!user.policies || user.policies.length === 0) {
-        console.log("[Action] Claim REJECTED: No active policy found.");
-        return { claimId: null, status: "REJECTED", payoutAmount: 0, reason: "No active policy found for this user.", success: false };
+        const reason = "No active policy found for this user.";
+        console.log(`[Action] Claim REJECTED: ${reason}`);
+        await this.notificationService.createNotification(user.id, "Claim Rejected", reason, "ERROR");
+        return { claimId: null, status: "REJECTED", payoutAmount: 0, reason, success: false };
       }
 
       const policy = user.policies[0]!;
@@ -45,7 +50,6 @@ export class DisruptionService {
         );
         const wxCode = wxRes.data.current_weather.weathercode;
 
-        // WMO Weather interpretation codes: >= 51 means drizzle, heavy rain, snow, thunderstorms, etc.
         if (wxCode >= 51) {
           isWeatherDisrupted = true;
           weatherDetail = `Severe weather detected (WMO Code: ${wxCode})`;
@@ -87,15 +91,22 @@ export class DisruptionService {
 
         // Calculate Dynamic Payout based on intensity
         const riskMultiplier = isNewsDisrupted && isWeatherDisrupted ? 1.5 : 1.0;
-        
-        // Safely extract coverage amount or fallback to base premium
         const baseCoverage = policy.coverageAmount ? Number(policy.coverageAmount) : Number(policy.basePremium || 100);
         finalPayout = baseCoverage * riskMultiplier;
 
         console.log(`[Action] Claim APPROVED. Dynamic Multiplier: ${riskMultiplier}x | Payout: ${finalPayout}`);
 
-        // Trigger actual blockchain/wallet payout (using the correct method on your PayoutService)
+        // Trigger actual blockchain/wallet payout
         await this.payoutService.executeSingleUserPayout(user.id, finalPayout, "Parametric Auto-Claim");
+        
+        // 🔔 SEND SUCCESS NOTIFICATION
+        await this.notificationService.createNotification(
+          user.id, 
+          "Disruption Payout Approved!", 
+          `₹${finalPayout} has been successfully credited to your wallet due to verified local disruptions.`, 
+          "SUCCESS"
+        );
+
       } else {
         if (isFraudFlag) {
           rejectReason = "Rejected due to Fraud Flag (Inconsistent Edge Telemetry).";
@@ -105,6 +116,14 @@ export class DisruptionService {
           rejectReason = "Rejected due to unmet parametric criteria.";
         }
         console.log(`[Action] Claim REJECTED. Reason: ${rejectReason}`);
+
+        // 🔔 SEND REJECTION NOTIFICATION
+        await this.notificationService.createNotification(
+          user.id, 
+          "Claim Update", 
+          rejectReason, 
+          "WARNING"
+        );
       }
 
       // 6. Save Claim Record
@@ -145,7 +164,6 @@ export class DisruptionService {
 
   public async evaluateCity(city: string): Promise<void> {
     console.log(`[DisruptionService] Fallback evaluateCity triggered for ${city}`);
-    // Simplified stub to satisfy controller routing requirements
   }
 
   public async getRecentChecks(city: string): Promise<any[]> {

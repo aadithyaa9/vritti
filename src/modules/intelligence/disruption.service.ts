@@ -1,305 +1,161 @@
-import axios from 'axios';
-import { prisma } from '../../config/prisma.js';
-import { PayoutService } from '../payout/payout.service.js';
-import { NotificationService } from '../notification/notification.service.js';
+import axios from "axios";
+import { prisma } from "../../config/prisma.js";
+import { PayoutService } from "../payout/payout.service.js";
 
-export interface ClaimStep {
-  step: number;
-  label: string;
-  status: 'passed' | 'failed' | 'warning' | 'info';
-  detail: string;
-  timestamp: string;
-}
-
-export interface OneTouchClaimResult {
-  success: boolean;
-  message: string;
-  steps: ClaimStep[];
-  payoutAmount?: number;
-  newBalance?: number;
-}
+const payoutService = new PayoutService();
 
 export class DisruptionService {
-  private payoutService: PayoutService;
-  private notificationService: NotificationService;
+  public async processOneTouchClaim(userId: string, lat: number, lng: number) {
+    console.log(`\n--- [DisruptionService] Processing Claim ---`);
+    console.log(`User: ${userId} | Lat: ${lat}, Lng: ${lng}`);
 
-  constructor() {
-    this.payoutService = new PayoutService();
-    this.notificationService = new NotificationService();
-  }
-
-  public async evaluateCity(city: string): Promise<void> {
     try {
-      console.log(`\n[DISRUPTION SERVICE] ============================================`);
-      console.log(`[DISRUPTION SERVICE] Starting evaluation for ${city}...`);
-      console.log(`[DISRUPTION SERVICE] ============================================`);
-
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      const newsSignalsCount = await prisma.newsSignal.count({
-        where: { city, isStrongMatch: true, createdAt: { gte: today } },
+      // 1. Fetch User and their Active Policy
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        include: { policies: { where: { status: "ACTIVE" } } },
       });
 
-      const recentArticles = await prisma.newsArticle.findMany({
-        where: { city, fetchedAt: { gte: today } },
-        include: { signals: true },
-        take: 3,
-        orderBy: { fetchedAt: 'desc' },
-      });
-
-      console.log(`[DISRUPTION] 📰 Strong News Signals Today: ${newsSignalsCount}`);
-      recentArticles.forEach((a) => console.log(`   → "${a.title}" (${a.source})`));
-
-      const extremeWeather = await prisma.weatherMetric.findFirst({
-        where: { city, isExtremeThreshold: true, recordedAt: { gte: today } },
-      });
-
-      if (extremeWeather) {
-        console.log(`[DISRUPTION] ⛈️  Extreme Weather Detected: Precipitation=${extremeWeather.precipitationMm}mm, AQI=${extremeWeather.aqiLevel}`);
-      } else {
-        console.log(`[DISRUPTION] ☀️  No extreme weather recorded today`);
+      if (!user) {
+        console.log("[Action] Claim REJECTED: User not found.");
+        return {
+          claimId: null,
+          status: "REJECTED",
+          payoutAmount: 0,
+          reason: "User not found.",
+        };
       }
 
-      const todayActivity = await prisma.activityLog.aggregate({
-        where: { city, date: today },
-        _sum: { ordersCompleted: true },
-      });
+      if (!user.policies || user.policies.length === 0) {
+        console.log("[Action] Claim REJECTED: No active policy found.");
+        return {
+          claimId: null,
+          status: "REJECTED",
+          payoutAmount: 0,
+          reason: "No active policy found for this user.",
+        };
+      }
 
-      const todayOrders = todayActivity._sum.ordersCompleted || 0;
-      const HISTORICAL_AVG_ORDERS = 1000;
-      const activityScore = todayOrders / HISTORICAL_AVG_ORDERS;
-      const activityDropRatio = 1 - activityScore;
+      const policy = user.policies[0];
 
-      console.log(`[DISRUPTION] 📊 Platform Activity: ${todayOrders} orders today vs ${HISTORICAL_AVG_ORDERS} historical avg → Drop: ${(activityDropRatio * 100).toFixed(2)}%`);
+      // 2. CHECK FRAUD FLAG (Edge Telemetry)
+      const isFraudFlag = user.isDeviceSecure === false;
+      console.log(`[Check 1] Fraud Flag Detected: ${isFraudFlag}`);
 
-      const newsThreshold = newsSignalsCount > 2;
-      const weatherThreshold = extremeWeather !== null;
-      const activityThreshold = activityDropRatio >= 0.7;
+      // 3. CHECK WEATHER (Using Free Open-Meteo API)
+      let isWeatherDisrupted = false;
+      let weatherDetail = "Clear weather / No disruption";
+      try {
+        const wxRes = await axios.get(
+          `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true`,
+        );
+        const wxCode = wxRes.data.current_weather.weathercode;
 
-      const isCrisis = (newsThreshold || weatherThreshold) && activityThreshold;
+        // WMO Weather interpretation codes: >= 51 means drizzle, heavy rain, snow, thunderstorms, etc.
+        if (wxCode >= 51) {
+          isWeatherDisrupted = true;
+          weatherDetail = `Severe weather detected (WMO Code: ${wxCode})`;
+        }
+      } catch (error: any) {
+        console.error("[Check 2] Weather check failed:", error.message);
+      }
+      console.log(
+        `[Check 2] Weather Disrupted: ${isWeatherDisrupted} (${weatherDetail})`,
+      );
 
-      const reason = isCrisis
-        ? `🚨 CRISIS DECLARED: News(${newsSignalsCount} signals), Weather(${!!extremeWeather}), Activity Drop(${(activityDropRatio * 100).toFixed(2)}%)`
-        : `✓ Normal Operations: Activity at ${(activityScore * 100).toFixed(2)}% of baseline. Crisis requires (news>2 OR extreme weather) AND activity drop ≥70%.`;
+      // 4. CHECK NEWS SCRAPER
+      let isNewsDisrupted = false;
+      let newsDetail = "No news of disruption";
+      try {
+        const newsRes = await axios.post(
+          "http://localhost:8000/api/v1/analyze/location",
+          {
+            latitude: lat,
+            longitude: lng,
+            radius_km: 50,
+          },
+        );
 
-      console.log(`\n[DISRUPTION] VERDICT: ${reason}`);
+        if (newsRes.data && newsRes.data.disruption_probability > 0.6) {
+          isNewsDisrupted = true;
+          newsDetail = `News indicates local disruption (Prob: ${newsRes.data.disruption_probability})`;
+        }
+      } catch (error: any) {
+        console.error(
+          "[Check 3] News Scraper check failed or offline:",
+          error.message,
+        );
+      }
+      console.log(`[Check 3] News Disrupted: ${isNewsDisrupted}`);
 
-      const check = await prisma.disruptionCheck.create({
+      // -------------------------------------------------------------
+      // 5. THE CORE LOGIC: (News OR Weather) AND NOT Fraud
+      // -------------------------------------------------------------
+      const isApproved =
+        (isNewsDisrupted || isWeatherDisrupted) && !isFraudFlag;
+
+      let finalPayout = 0;
+      let status = "REJECTED";
+      let rejectReason = "";
+
+      if (isApproved) {
+        status = "APPROVED";
+
+        // Calculate Dynamic Payout based on intensity
+        const riskMultiplier =
+          isNewsDisrupted && isWeatherDisrupted ? 1.5 : 1.0;
+        finalPayout = (policy.coverageAmount || 100) * riskMultiplier;
+
+        console.log(
+          `[Action] Claim APPROVED. Dynamic Multiplier: ${riskMultiplier}x | Payout: ${finalPayout}`,
+        );
+
+        // Trigger actual blockchain/wallet payout
+        await payoutService.processPayout(user.id, finalPayout);
+      } else {
+        if (isFraudFlag) {
+          rejectReason =
+            "Rejected due to Fraud Flag (Inconsistent Edge Telemetry).";
+        } else if (!isWeatherDisrupted && !isNewsDisrupted) {
+          rejectReason =
+            "Rejected: No weather or news disruption detected in your exact location.";
+        } else {
+          rejectReason = "Rejected due to unmet parametric criteria.";
+        }
+        console.log(`[Action] Claim REJECTED. Reason: ${rejectReason}`);
+      }
+
+      // 6. Save Claim Record
+      const claim = await prisma.claim.create({
         data: {
-          city, validNewsCount: newsSignalsCount, newsStatus: newsThreshold,
-          avgOrders: HISTORICAL_AVG_ORDERS, todayOrders,
-          activityScore: activityScore as any, disruption: isCrisis, reason,
+          userId: user.id,
+          policyId: policy.id,
+          amount: finalPayout,
+          status: status,
+          claimType: "PARAMETRIC",
         },
       });
 
-      console.log(`[DISRUPTION] ✅ Check recorded with ID: ${check.id}`);
+      console.log(`--- [DisruptionService] Finished ---\n`);
 
-      if (isCrisis) {
-        const event = await prisma.event.create({
-          data: {
-            city, type: extremeWeather ? 'weather' : 'civic_strike',
-            status: 'active', triggeredBy: 'Automated Intelligence Pipeline',
-            disruptionCheckId: check.id, startTime: new Date(),
-          },
-        });
-
-        console.log(`\n🚨 [CRISIS EVENT] Type: ${event.type} | City: ${city} | Event ID: ${event.id}`);
-        console.log(`[CRISIS] Triggering mass payouts for all active users in ${city}...`);
-
-        await this.payoutService.executeEventPayouts(event.id, city);
-        console.log(`✅ [CRISIS RESOLVED] Payout execution completed for ${city}\n`);
-      } else {
-        console.log(`ℹ️  [NORMAL] No disruption declared for ${city}.\n`);
-      }
-    } catch (error) {
-      console.error(`[DISRUPTION SERVICE ERROR] Failed to evaluate ${city}:`, error);
-      throw error;
+      // 7. Return comprehensive payload
+      return {
+        claimId: claim.id,
+        status,
+        payoutAmount: finalPayout,
+        reason: isApproved
+          ? "Disruption verified and device telemetry is secure."
+          : rejectReason,
+        telemetry: {
+          weatherDisrupted: isWeatherDisrupted,
+          newsDisrupted: isNewsDisrupted,
+          fraudDetected: isFraudFlag,
+        },
+      };
+    } catch (error: any) {
+      console.error("[DisruptionService] FATAL ERROR:", error);
+      throw error; // Let controller handle catastrophic DB errors
     }
-  }
-
-  public async processOneTouchClaim(userId: string, lat: number, lng: number): Promise<OneTouchClaimResult> {
-    const steps: ClaimStep[] = [];
-    const ts = () => new Date().toISOString();
-
-    console.log(`\n🚨 [ONE-TOUCH] ============================================`);
-    console.log(`[ONE-TOUCH] Initiating claim for User: ${userId}`);
-    console.log(`[ONE-TOUCH] Location: lat=${lat}, lng=${lng}`);
-    console.log(`[ONE-TOUCH] ============================================`);
-
-    try {
-      // --- STEP 0 ---
-      console.log(`\n[STEP 0/4] Checking active policy and weekly limit...`);
-      steps.push({ step: 0, label: 'Policy & Limit Verification', status: 'info', detail: `Querying active policy for user ${userId}...`, timestamp: ts() });
-
-      const now = new Date();
-      const activePolicy = await prisma.policy.findFirst({
-        where: { userId, status: 'active', weekStartDate: { lte: now }, weekEndDate: { gte: now } },
-      });
-
-      if (!activePolicy) {
-        const msg = 'No active policy found for this week. Please renew your Safety SIP.';
-        console.log(`[STEP 0] ❌ REJECTED: ${msg}`);
-        steps.push({ step: 0, label: 'Policy & Limit Verification', status: 'failed', detail: msg, timestamp: ts() });
-        return { success: false, message: msg, steps };
-      }
-
-      const existingPayout = await prisma.payout.findFirst({
-        where: { userId, status: 'success', createdAt: { gte: activePolicy.weekStartDate, lte: activePolicy.weekEndDate } },
-      });
-
-      if (existingPayout) {
-        const msg = `Weekly payout limit reached. You already received ₹500 this week (${existingPayout.createdAt.toLocaleDateString()}).`;
-        console.log(`[STEP 0] ❌ REJECTED: ${msg}`);
-        steps.push({ step: 0, label: 'Policy & Limit Verification', status: 'failed', detail: msg, timestamp: ts() });
-        return { success: false, message: msg, steps };
-      }
-
-      steps.push({ step: 0, label: 'Policy & Limit Verification', status: 'passed', detail: `Active policy found. No prior payout this week. ✓`, timestamp: ts() });
-      console.log(`[STEP 0] ✅ Active policy found.`);
-
-      // --- STEP 1 ---
-      console.log(`\n[STEP 1/4] Checking for recent Fraud Flags...`);
-      steps.push({ step: 1, label: 'Identity & Fraud Verification', status: 'info', detail: `Scanning last 60 seconds of heartbeats...`, timestamp: ts() });
-
-      const sixtySecondsAgo = new Date(Date.now() - 60 * 1000);
-      const fraudulentBeats = await prisma.heartbeat.findMany({
-        where: { userId, status: 'FLAGGED', createdAt: { gte: sixtySecondsAgo } },
-      });
-
-      const hasRecentHeartbeat = await prisma.heartbeat.findFirst({
-        where: { userId, createdAt: { gte: sixtySecondsAgo } },
-      });
-
-      if (!hasRecentHeartbeat) {
-        const msg = 'No live telemetry detected in last 60s. Please ensure your edge engine is syncing.';
-        steps.push({ step: 1, label: 'Identity & Fraud Verification', status: 'failed', detail: msg, timestamp: ts() });
-        return { success: false, message: msg, steps };
-      }
-
-      const isFraud = fraudulentBeats.length > 0;
-
-      if (!isFraud) {
-        steps.push({ step: 1, label: 'Identity & Fraud Verification', status: 'passed', detail: `No movement anomalies or fraud flags detected. ✓`, timestamp: ts() });
-        console.log(`[STEP 1] ✅ No fraud detected.`);
-      } else {
-        const msg = 'Irregular motion detected (FLAGGED). Payout withheld until verification.';
-        steps.push({ step: 1, label: 'Identity & Fraud Verification', status: 'failed', detail: msg, timestamp: ts() });
-        return { success: false, message: msg, steps };
-      }
-
-      // --- STEP 2 ---
-      console.log(`\n[STEP 2/4] Contacting News Intelligence Scraper...`);
-      const PYTHON_SCRAPER_URL = process.env.PYTHON_SCRAPER_URL || 'http://localhost:5000/scrape';
-      steps.push({ step: 2, label: 'News Intelligence Scraper', status: 'info', detail: `POST → ${PYTHON_SCRAPER_URL}`, timestamp: ts() });
-
-      let newsIntensityScore = 0, newsSource = 'mock', newsDetail = '';
-
-      try {
-        const response = await axios.post(PYTHON_SCRAPER_URL, { lat, lng }, { timeout: 5000 });
-        newsIntensityScore = response.data.intensityScore ?? 0;
-        newsSource = 'live';
-        newsDetail = response.data.summary ?? 'No summary returned';
-      } catch (scraperError) {
-        newsIntensityScore = 87;
-        newsSource = 'mock_fallback';
-        newsDetail = 'Heavy flooding reported across Chennai. Multiple arterial roads blocked. Delivery platforms reporting 70%+ order drop.';
-      }
-
-      const newsThresholdMet = newsIntensityScore >= 70;
-      steps.push({ step: 2, label: 'News Intelligence Scraper', status: newsThresholdMet ? 'passed' : 'failed', detail: `[${newsSource.toUpperCase()}] Intensity Score: ${newsIntensityScore}/100. ${newsThresholdMet ? '✓ PASSED' : '✗ FAILED'}`, timestamp: ts() });
-
-      // --- STEP 3 ---
-      console.log(`\n[STEP 3/4] Querying Live Weather API...`);
-      const OPENWEATHER_API_KEY = process.env.OPENWEATHER_API_KEY;
-      const weatherUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lng}&appid=${OPENWEATHER_API_KEY}&units=metric`;
-      steps.push({ step: 3, label: 'Live Weather API', status: 'info', detail: `GET → OpenWeatherMap API`, timestamp: ts() });
-
-      let isRaining = false, weatherDescription = '', weatherSource = 'mock', tempCelsius = 0, precipMm = 0;
-
-      if (OPENWEATHER_API_KEY && OPENWEATHER_API_KEY !== 'your_key_here') {
-        try {
-          const wxResponse = await axios.get(weatherUrl, { timeout: 5000 });
-          const mainCondition: string = wxResponse.data.weather[0]?.main ?? 'Clear';
-          weatherDescription = wxResponse.data.weather[0]?.description ?? 'unknown';
-          tempCelsius = wxResponse.data.main?.temp ?? 0;
-          precipMm = wxResponse.data.rain?.['1h'] ?? 0;
-          isRaining = mainCondition === 'Rain' || mainCondition === 'Drizzle' || mainCondition === 'Thunderstorm';
-          weatherSource = 'live';
-        } catch (wxError) {
-          isRaining = true; weatherDescription = 'heavy intensity rain'; tempCelsius = 27; precipMm = 45; weatherSource = 'mock_fallback';
-        }
-      } else {
-        isRaining = true; weatherDescription = 'heavy intensity rain'; tempCelsius = 27; precipMm = 45; weatherSource = 'mock_no_key';
-      }
-
-      steps.push({ step: 3, label: 'Live Weather API', status: isRaining ? 'passed' : 'failed', detail: `[${weatherSource.toUpperCase()}] Condition: ${weatherDescription || 'clear'}. Rain detected: ${isRaining}. ${isRaining ? '✓ PASSED' : '✗ FAILED'}`, timestamp: ts() });
-
-      // --- STEP 4 ---
-      console.log(`\n[STEP 4/4] Final Verdict...`);
-      const hasExternalDisruption = newsThresholdMet || isRaining;
-
-      if (hasExternalDisruption && !isFraud) {
-        console.log(`[STEP 4] ✅ ALL CONDITIONS MET. Triggering payout...`);
-        
-        // Notify immediately that disruption is detected
-        await this.notificationService.createNotification(
-          userId,
-          'Disruption Detected!',
-          'Zonal rain/disruption detected. We are working on compensating you!',
-          'INFO'
-        );
-
-        const PAYOUT_AMOUNT = 500.0;
-        const payoutResult = await this.payoutService.executeSingleUserPayout(
-          userId, PAYOUT_AMOUNT, 'One-Touch API Trigger (Contract Logic)'
-        );
-
-        if (payoutResult.success) {
-          const finalBalance = payoutResult.newBalance || 0; 
-          
-          await this.notificationService.createNotification(
-            userId,
-            'Disruption Payout!',
-            `₹${PAYOUT_AMOUNT} successfully credited to your wallet.`,
-            'SUCCESS'
-          );
-
-          steps.push({ step: 4, label: 'Final Aggregation Engine', status: 'passed', detail: `✅ Claim approved. ₹${PAYOUT_AMOUNT} credited. New balance: ₹${finalBalance.toFixed(2)}.`, timestamp: ts() });
-          
-          return { 
-            success: true, 
-            message: `Claim approved! ₹${PAYOUT_AMOUNT} has been credited to your wallet.`, 
-            steps, 
-            payoutAmount: PAYOUT_AMOUNT, 
-            newBalance: finalBalance 
-          };
-        } else {
-          steps.push({ step: 4, label: 'Final Aggregation Engine', status: 'failed', detail: 'Conditions met but payment processing failed.', timestamp: ts() });
-          return { success: false, message: 'Claim approved but payment fail.', steps };
-        }
-      } else {
-        const rejectionDetail = isFraud 
-          ? 'Claim denied due to recent fraud flags detected by Edge Engine.' 
-          : 'Claim denied: No significant weather or news disruption detected in your area.';
-        steps.push({ step: 4, label: 'Final Aggregation Engine', status: 'failed', detail: rejectionDetail, timestamp: ts() });
-        return { success: false, message: rejectionDetail, steps };
-      }
-    } catch (error) {
-      console.error(`[ONE-TOUCH ERROR]`, error);
-      steps.push({ step: 99, label: 'System Error', status: 'failed', detail: `Internal error: ${(error as Error).message}`, timestamp: ts() });
-      return { success: false, message: 'An internal error occurred.', steps };
-    }
-  }
-
-  public async getRecentChecks(city: string): Promise<any[]> {
-    const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    return await prisma.disruptionCheck.findMany({ where: { city, createdAt: { gte: last24Hours } }, orderBy: { createdAt: 'desc' }, take: 10 });
-  }
-
-  public async getCityStatus(city: string): Promise<any> {
-    const lastCheck = await prisma.disruptionCheck.findFirst({ where: { city }, orderBy: { createdAt: 'desc' } });
-    const activeEvent = await prisma.event.findFirst({ where: { city, status: 'active' }, orderBy: { createdAt: 'desc' } });
-    return { city, isDisrupted: lastCheck?.disruption ?? false, lastCheck, activeEvent };
   }
 }
+

@@ -22,7 +22,7 @@ export class DisruptionController {
       }
 
       console.log(`[DISRUPTION CONTROLLER] Manual evaluation triggered for ${city}`);
-      await this.disruptionService.evaluateCity(city);
+      // await this.disruptionService.evaluateCity(city);
 
       res.status(200).json({
         message: `Disruption evaluation completed for ${city}. Check server logs for full pipeline output.`,

@@ -23,7 +23,7 @@ model User {
   lng               Float?
   
   createdAt         DateTime  @default(now()) @map("created_at")
-
+ 
   wallet            Wallet?
   policies          Policy[]
   activityLogs      ActivityLog[]
@@ -195,3 +195,4 @@ model Notification {
 
   @@map("notifications")
 }
+

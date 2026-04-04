@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -15,24 +15,25 @@ model User {
   platform          String?
   incomeBracket     String?
   isDeviceSecure    Boolean   @default(true) @map("is_device_secure")
-  backgroundConsent Boolean   @default(false) @map("background_consent") // 🆕 explicit consent
+  backgroundConsent Boolean   @default(false) @map("background_consent")
   
   otpCode           String?   @map("otp_code")
   otpExpiresAt      DateTime? @map("otp_expires_at")
   lat               Float?
   lng               Float?
-  
   createdAt         DateTime  @default(now()) @map("created_at")
  
   wallet            Wallet?
   policies          Policy[]
   activityLogs      ActivityLog[]
   payouts           Payout[]
-  heartbeats        Heartbeat[] // 🆕 relation to Edge Engine
-
+  heartbeats        Heartbeat[]
   notifications     Notification[]
+  claims            Claim[] // 🆕 Added for DisruptionService
+
   @@map("users")
 }
+
 model Wallet {
   id            String   @id @default(uuid()) @db.Uuid
   userId        String   @unique @map("user_id") @db.Uuid
@@ -54,12 +55,29 @@ model Policy {
   wLocMultiplier   Decimal  @map("w_loc_multiplier") @db.Decimal
   loyaltyDiscount  Decimal  @map("loyalty_discount") @db.Decimal
   finalPremiumPaid Decimal  @map("final_premium_paid") @db.Decimal
-  status           String   // 'active', 'expired', 'defaulted'
+  coverageAmount   Decimal? @map("coverage_amount") @db.Decimal // 🆕 Added
+  status           String   
   createdAt        DateTime @default(now()) @map("created_at")
 
-  user User @relation(fields: [userId], references: [id])
+  user   User    @relation(fields: [userId], references: [id])
+  claims Claim[] // 🆕 Added
 
   @@map("policies")
+}
+
+model Claim {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  policyId    String   @map("policy_id") @db.Uuid
+  amount      Decimal  @db.Decimal
+  status      String   
+  claimType   String   @map("claim_type")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user   User   @relation(fields: [userId], references: [id])
+  policy Policy @relation(fields: [policyId], references: [id])
+
+  @@map("claims")
 }
 
 model ActivityLog {
@@ -138,8 +156,8 @@ model DisruptionCheck {
 model Event {
   id                String    @id @default(uuid()) @db.Uuid
   city              String?
-  type              String?   
-  status            String?   
+  type              String?
+  status            String?
   triggeredBy       String?   @map("triggered_by")
   disruptionCheckId String?   @map("disruption_check_id") @db.Uuid
   startTime         DateTime? @map("start_time")
@@ -166,16 +184,15 @@ model Payout {
   @@map("payouts")
 }
 
-
 model Heartbeat {
   id        String   @id @default(uuid()) @db.Uuid
   userId    String   @map("user_id") @db.Uuid
   lat       Float?
   lng       Float?
-  status    String   // 'NORMAL' or 'FLAGGED'
+  status    String   
   speed     Float?
   maeScore  Float?   @map("mae_score")
-  sensors   Json?    // Stores { ax, ay, az, gx, gy, gz }
+  sensors   Json?    
   createdAt DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id])
@@ -188,11 +205,10 @@ model Notification {
   userId    String   @map("user_id") @db.Uuid
   title     String
   message   String
-  type      String   // 'SUCCESS', 'INFO', 'WARNING', 'ERROR'
+  type      String   
   timestamp DateTime @default(now()) @map("timestamp")
 
   user User @relation(fields: [userId], references: [id])
 
   @@map("notifications")
 }
-

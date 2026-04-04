@@ -246,7 +246,6 @@ export class PricingEngineService {
       if (String(user.incomeBracket || '').includes('15k')) tier = 'gold';
 
       const platform = user.platform ? user.platform.toLowerCase() : 'swiggy';
-
       const payload: PricingEngineRequest = {
         rider_id: userId,
         home_zone_id: zoneId,

@@ -1,6 +1,7 @@
+import axios from 'axios';
 import { prisma } from '../../config/prisma.js';
 import { PayoutService } from '../payout/payout.service.js';
-import axios from 'axios';
+import { NotificationService } from '../notification/notification.service.js';
 
 export interface ClaimStep {
   step: number;
@@ -20,9 +21,11 @@ export interface OneTouchClaimResult {
 
 export class DisruptionService {
   private payoutService: PayoutService;
+  private notificationService: NotificationService;
 
   constructor() {
     this.payoutService = new PayoutService();
+    this.notificationService = new NotificationService();
   }
 
   public async evaluateCity(city: string): Promise<void> {
@@ -156,30 +159,33 @@ export class DisruptionService {
       console.log(`[STEP 0] ✅ Active policy found.`);
 
       // --- STEP 1 ---
-      console.log(`\n[STEP 1/4] Querying Edge Engine heartbeat data...`);
-      steps.push({ step: 1, label: 'Edge Engine Physical Verification', status: 'info', detail: `Scanning heartbeat table for FLAGGED status in last 15 minutes...`, timestamp: ts() });
+      console.log(`\n[STEP 1/4] Checking for recent Fraud Flags...`);
+      steps.push({ step: 1, label: 'Identity & Fraud Verification', status: 'info', detail: `Scanning last 60 seconds of heartbeats...`, timestamp: ts() });
 
-      const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
-      const recentHeartbeat = await prisma.heartbeat.findFirst({
-        where: { userId, status: 'FLAGGED', createdAt: { gte: fifteenMinsAgo } },
-        orderBy: { createdAt: 'desc' },
+      const sixtySecondsAgo = new Date(Date.now() - 60 * 1000);
+      const fraudulentBeats = await prisma.heartbeat.findMany({
+        where: { userId, status: 'FLAGGED', createdAt: { gte: sixtySecondsAgo } },
       });
 
-      const isPhysicallyFlagged = !!recentHeartbeat;
+      const hasRecentHeartbeat = await prisma.heartbeat.findFirst({
+        where: { userId, createdAt: { gte: sixtySecondsAgo } },
+      });
 
-      if (isPhysicallyFlagged) {
-        const minutesAgo = Math.floor((Date.now() - recentHeartbeat!.createdAt.getTime()) / 60000);
-        steps.push({ step: 1, label: 'Edge Engine Physical Verification', status: 'passed', detail: `FLAGGED heartbeat detected ${minutesAgo} minute(s) ago. Physical presence verified. ✓`, timestamp: ts() });
-        console.log(`[STEP 1] ✅ FLAGGED heartbeat found.`);
+      if (!hasRecentHeartbeat) {
+        const msg = 'No live telemetry detected in last 60s. Please ensure your edge engine is syncing.';
+        steps.push({ step: 1, label: 'Identity & Fraud Verification', status: 'failed', detail: msg, timestamp: ts() });
+        return { success: false, message: msg, steps };
+      }
+
+      const isFraud = fraudulentBeats.length > 0;
+
+      if (!isFraud) {
+        steps.push({ step: 1, label: 'Identity & Fraud Verification', status: 'passed', detail: `No movement anomalies or fraud flags detected. ✓`, timestamp: ts() });
+        console.log(`[STEP 1] ✅ No fraud detected.`);
       } else {
-        const anyRecent = await prisma.heartbeat.findFirst({
-          where: { userId, createdAt: { gte: fifteenMinsAgo } }, orderBy: { createdAt: 'desc' },
-        });
-        if (anyRecent) {
-          steps.push({ step: 1, label: 'Edge Engine Physical Verification', status: 'warning', detail: `Last heartbeat was NORMAL. Edge Engine did not flag motion irregularity.`, timestamp: ts() });
-        } else {
-          steps.push({ step: 1, label: 'Edge Engine Physical Verification', status: 'warning', detail: `No heartbeat received in the last 15 minutes.`, timestamp: ts() });
-        }
+        const msg = 'Irregular motion detected (FLAGGED). Payout withheld until verification.';
+        steps.push({ step: 1, label: 'Identity & Fraud Verification', status: 'failed', detail: msg, timestamp: ts() });
+        return { success: false, message: msg, steps };
       }
 
       // --- STEP 2 ---
@@ -230,42 +236,52 @@ export class DisruptionService {
       steps.push({ step: 3, label: 'Live Weather API', status: isRaining ? 'passed' : 'failed', detail: `[${weatherSource.toUpperCase()}] Condition: ${weatherDescription || 'clear'}. Rain detected: ${isRaining}. ${isRaining ? '✓ PASSED' : '✗ FAILED'}`, timestamp: ts() });
 
       // --- STEP 4 ---
-      console.log(`\n[STEP 4/4] Running Final Aggregation Engine...`);
+      console.log(`\n[STEP 4/4] Final Verdict...`);
       const hasExternalDisruption = newsThresholdMet || isRaining;
 
-      steps.push({ step: 4, label: 'Final Aggregation Engine', status: 'info', detail: `Aggregating conditions...`, timestamp: ts() });
-
-      if (hasExternalDisruption && isPhysicallyFlagged) {
+      if (hasExternalDisruption && !isFraud) {
         console.log(`[STEP 4] ✅ ALL CONDITIONS MET. Triggering payout...`);
-        const PAYOUT_AMOUNT = 500.0;
         
+        // Notify immediately that disruption is detected
+        await this.notificationService.createNotification(
+          userId,
+          'Disruption Detected!',
+          'Zonal rain/disruption detected. We are working on compensating you!',
+          'INFO'
+        );
+
+        const PAYOUT_AMOUNT = 500.0;
         const payoutResult = await this.payoutService.executeSingleUserPayout(
-          userId, PAYOUT_AMOUNT, 'One-Touch: Edge Engine + News Scraper + Weather API'
+          userId, PAYOUT_AMOUNT, 'One-Touch API Trigger (Contract Logic)'
         );
 
         if (payoutResult.success) {
-          // 🚨 FIXED HERE: Provided a solid fallback of 0 so TypeScript knows it's always a number
           const finalBalance = payoutResult.newBalance || 0; 
           
-          steps.push({ step: 4, label: 'Final Aggregation Engine', status: 'passed', detail: `✅ ALL CONDITIONS MET. ₹${PAYOUT_AMOUNT} credited to your Gullak wallet. New balance: ₹${finalBalance.toFixed(2)}.`, timestamp: ts() });
+          await this.notificationService.createNotification(
+            userId,
+            'Disruption Payout!',
+            `₹${PAYOUT_AMOUNT} successfully credited to your wallet.`,
+            'SUCCESS'
+          );
+
+          steps.push({ step: 4, label: 'Final Aggregation Engine', status: 'passed', detail: `✅ Claim approved. ₹${PAYOUT_AMOUNT} credited. New balance: ₹${finalBalance.toFixed(2)}.`, timestamp: ts() });
           
           return { 
             success: true, 
-            message: `Claim approved! ₹${PAYOUT_AMOUNT} has been credited to your Gullak.`, 
+            message: `Claim approved! ₹${PAYOUT_AMOUNT} has been credited to your wallet.`, 
             steps, 
             payoutAmount: PAYOUT_AMOUNT, 
             newBalance: finalBalance 
           };
         } else {
-          steps.push({ step: 4, label: 'Final Aggregation Engine', status: 'failed', detail: 'Conditions met but payment processing encountered an error.', timestamp: ts() });
-          return { success: false, message: 'Claim approved but payment processing failed.', steps };
+          steps.push({ step: 4, label: 'Final Aggregation Engine', status: 'failed', detail: 'Conditions met but payment processing failed.', timestamp: ts() });
+          return { success: false, message: 'Claim approved but payment fail.', steps };
         }
       } else {
-        const reasons: string[] = [];
-        if (!isPhysicallyFlagged) reasons.push('Edge Engine did not detect a physical anomaly');
-        if (!hasExternalDisruption) reasons.push('External APIs show clear conditions');
-
-        const rejectionDetail = `Claim denied: ${reasons.join('. ')}.`;
+        const rejectionDetail = isFraud 
+          ? 'Claim denied due to recent fraud flags detected by Edge Engine.' 
+          : 'Claim denied: No significant weather or news disruption detected in your area.';
         steps.push({ step: 4, label: 'Final Aggregation Engine', status: 'failed', detail: rejectionDetail, timestamp: ts() });
         return { success: false, message: rejectionDetail, steps };
       }

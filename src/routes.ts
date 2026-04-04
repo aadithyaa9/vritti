@@ -4,6 +4,9 @@ import { PremiumController } from './modules/premium/premium.controller.js';
 import { AuthController } from './modules/auth/auth.controller.js';
 import { FraudController } from './modules/fraud/fraud.controller.js';
 import { LocationController } from './modules/location/location.controller.js';
+import { DashboardController } from './modules/dashboard/dashboard.controller.js';
+import { DemoController } from './modules/demo/demo.controller.js';
+import { NotificationService } from './modules/notification/notification.service.js';
 import { PremiumService } from './modules/premium/premium.service.js';
 import { PayoutService } from './modules/payout/payout.service.js';
 import { prisma } from './config/prisma.js';
@@ -16,6 +19,8 @@ const fraudController = new FraudController();
 const locationController = new LocationController();
 const premiumService = new PremiumService();
 const payoutService = new PayoutService();
+const dashboardController = new DashboardController();
+const demoController = new DemoController();
 
 // ============================================================
 // 🔐 AUTH — Onboarding & Sign In
@@ -29,53 +34,13 @@ router.get('/api/v1/auth/profile/:userId', (req, res) => authController.getUserP
 // ============================================================
 router.post('/api/v1/user/location', (req, res) => locationController.syncLocation(req, res));
 router.post('/api/heartbeat', (req, res) => fraudController.syncHeartbeat(req, res));
+router.post('/api/v1/telemetry/heartbeat', (req, res) => fraudController.syncHeartbeat(req, res));
 router.get('/api/v1/user/heartbeat/:userId', (req, res) => fraudController.getHeartbeatStatus(req, res));
 
 // ============================================================
-// 📊 DASHBOARD
+// 📊 DASHBOARD (Unified Contract)
 // ============================================================
-router.get('/api/v1/user/dashboard/:userId', async (req, res) => {
-  const { userId } = req.params as { userId: string };
-
-  try {
-    const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
-    
-    // 🚨 FIXED: Moved recentFlag into Promise.all to prevent waterfall delay on UI
-    const [invested, credited, user, latestHeartbeat, recentPayouts, recentFlag] = await Promise.all([
-      premiumService.getTotalInvested(userId),
-      payoutService.getTotalCredited(userId),
-      prisma.user.findUnique({
-        where: { id: userId },
-        include: { wallet: true, policies: { where: { status: 'active' }, orderBy: { createdAt: 'desc' }, take: 1 } },
-      }),
-      prisma.heartbeat.findFirst({ where: { userId }, orderBy: { createdAt: 'desc' } }),
-      payoutService.getPayoutHistory(userId, 5),
-      prisma.heartbeat.findFirst({ where: { userId, status: 'FLAGGED', createdAt: { gte: fifteenMinsAgo } } })
-    ]);
-
-    if (!user) { res.status(404).json({ error: 'User not found' }); return; }
-
-    res.status(200).json({
-      userId,
-      moneyInvested: invested,
-      moneyCredited: credited,
-      currentBalance: user.wallet ? Number(user.wallet.balance) : 0,
-      incomeBracket: user.incomeBracket,
-      activePolicy: user.policies[0] ?? null,
-      edgeEngine: {
-        latestStatus: latestHeartbeat?.status ?? 'NO_DATA',
-        isActivelyFlagged: !!recentFlag,
-        lastBeatAt: latestHeartbeat?.createdAt ?? null,
-        minutesSinceLastBeat: latestHeartbeat ? Math.floor((Date.now() - latestHeartbeat.createdAt.getTime()) / 60000) : null,
-      },
-      recentPayouts,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (err) {
-    console.error('[DASHBOARD ERROR]', err);
-    res.status(500).json({ error: 'Dashboard data fetch failed' });
-  }
-});
+router.get('/api/v1/user/dashboard/:userId', (req, res) => dashboardController.getDashboardData(req, res));
 
 // ============================================================
 // 🔍 INTELLIGENCE & DISRUPTION
@@ -86,9 +51,10 @@ router.get('/api/v1/intelligence/status/:city', (req, res) => disruptionControll
 router.get('/api/v1/intelligence/health', (req, res) => disruptionController.health(req, res));
 
 // ============================================================
-// 💳 ONE-TOUCH CLAIM
+// 💳 ONE-TOUCH CLAIM (Contract Login)
 // ============================================================
 router.post('/api/v1/claims/one-touch', (req, res) => disruptionController.oneTouchClaim(req, res));
+router.post('/api/v1/claims/trigger', (req, res) => disruptionController.oneTouchClaim(req, res));
 
 // ============================================================
 // 💰 PREMIUM & POLICIES
@@ -120,6 +86,8 @@ router.get('/api/v1/payouts/:userId', async (req, res) => {
 router.get('/health', (req, res) => {
   res.status(200).json({ status: 'Online', service: 'Vritti-Core', version: '2.0.0', timestamp: new Date().toISOString(), uptime: process.uptime() });
 });
+
+router.post('/api/demo/simulate-week', (req, res) => demoController.simulateWeek(req, res));
 
 router.post('/api/demo/force-trigger', async (req, res) => {
   const { city } = req.body as { city?: string };

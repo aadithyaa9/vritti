@@ -1,4 +1,4 @@
-import { prisma } from "../config/prisma";
+import { prisma } from "../config/prisma.js";
 
 // Simple rule-based Edge Engine (Phase 1)
 export async function runEdgeEngine(city: string) {

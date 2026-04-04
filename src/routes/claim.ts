@@ -1,5 +1,5 @@
 import express from "express";
-import { validateAndProcessClaim } from "../services/claimService";
+import { validateAndProcessClaim } from "../services/claimService.js";
 
 const router = express.Router();
 

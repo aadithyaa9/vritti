@@ -1,4 +1,4 @@
-import { prisma } from "../config/prisma";
+import { prisma } from "../config/prisma.js";
 
 export async function validateAndProcessClaim(userId: string) {
   // 1. Check active policy
@@ -14,7 +14,7 @@ export async function validateAndProcessClaim(userId: string) {
   const startOfWeek = new Date();
   startOfWeek.setDate(startOfWeek.getDate() - 7);
 
-  const existingClaim = await prisma.claim.findFirst({
+  const existingClaim = await prisma.payout.findFirst({
     where: {
       userId,
       createdAt: { gte: startOfWeek }
@@ -31,7 +31,7 @@ export async function validateAndProcessClaim(userId: string) {
   }
 
   // 4. Transaction: payout
-  return await prisma.$transaction(async (tx) => {
+  return await prisma.$transaction(async (tx: any) => {
     const payoutAmount = 500;
 
     await tx.wallet.update({
@@ -39,10 +39,12 @@ export async function validateAndProcessClaim(userId: string) {
       data: { balance: { increment: payoutAmount } }
     });
 
-    await tx.claim.create({
+    await tx.payout.create({
       data: {
         userId,
-        amount: payoutAmount
+        amount: payoutAmount,
+        eventId: '00000000-0000-0000-0000-000000000000', // Mock event ID for legacy compatibility
+        status: 'SUCCESS'
       }
     });
 

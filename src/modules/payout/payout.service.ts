@@ -140,4 +140,21 @@ export class PayoutService {
       return { success: false };
     }
   }
+
+  // RESTORED METHODS TO FIX COMPILATION ERRORS
+  public async getTotalCredited(userId: string): Promise<number> {
+    const result = await prisma.payout.aggregate({
+      where: { userId, status: "success" },
+      _sum: { amount: true },
+    });
+    return Number(result._sum.amount || 0);
+  }
+
+  public async getPayoutHistory(userId: string, limit: number): Promise<any[]> {
+    return await prisma.payout.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    });
+  }
 }

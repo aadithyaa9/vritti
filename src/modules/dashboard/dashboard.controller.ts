@@ -45,7 +45,7 @@ export class DashboardController {
         weeklyEarnings: 10450, // Mock for now as per friend's suggestion, or calculate from ActivityLog
         walletBalance: user.wallet ? Number(user.wallet.balance) : 0,
         moneyCredited: credited,
-        notifications: notifications.map(n => ({
+        notifications: notifications.map((n: any) => ({
           id: n.id,
           title: n.title,
           message: n.message,

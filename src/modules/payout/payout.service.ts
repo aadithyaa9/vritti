@@ -3,7 +3,6 @@ import { prisma } from "../../config/prisma.js";
 export class PayoutService {
   private readonly DAILY_PAYOUT_AMOUNT = 500.0;
 
-  // Added this method to bridge the gap with DisruptionService
   public async processPayout(userId: string, amount: number): Promise<void> {
     await this.executeSingleUserPayout(
       userId,
@@ -29,7 +28,6 @@ export class PayoutService {
 
     for (const policy of affectedPolicies) {
       if (!policy.user.wallet) continue;
-
       try {
         await prisma.$transaction(async (tx) => {
           const updatedWallet = await tx.wallet.update({
@@ -64,17 +62,31 @@ export class PayoutService {
     }
   }
 
+  // FAST INTERNAL GATEWAY FOR DEMO
   public async executeSingleUserPayout(
     userId: string,
     amount: number,
     triggerSource: string,
-  ): Promise<{ success: boolean; newBalance?: number }> {
+  ): Promise<{
+    success: boolean;
+    newBalance?: number;
+    transactionId?: string;
+    gatewayStatus?: string;
+  }> {
     try {
       const user = await prisma.user.findUnique({
         where: { id: userId },
         include: { wallet: true },
       });
       if (!user || !user.wallet) return { success: false };
+
+      console.log(`[GATEWAY] Processing internal transfer...`);
+      await new Promise((resolve) => setTimeout(resolve, 800)); // Brief realistic delay
+
+      const bankRef = Math.floor(
+        100000000000 + Math.random() * 900000000000,
+      ).toString();
+      const transactionId = `UPI_${bankRef}`;
 
       const event = await prisma.event.create({
         data: {
@@ -112,29 +124,20 @@ export class PayoutService {
 
         return updatedWallet;
       });
+
       console.log(
-        `[PAYOUT SUCCESS] One-Touch payout of ₹${amount} credited for ${userId}`,
+        `[PAYOUT SUCCESS] ₹${amount} credited for ${userId} (Txn: ${transactionId})`,
       );
-      return { success: true, newBalance: Number(finalWallet.balance) };
+
+      return {
+        success: true,
+        newBalance: Number(finalWallet.balance),
+        transactionId,
+        gatewayStatus: "COMPLETED",
+      };
     } catch (error) {
       console.error(`[PAYOUT FAILED] One-Touch failed for ${userId}`, error);
       return { success: false };
     }
-  }
-
-  public async getTotalCredited(userId: string): Promise<number> {
-    const result = await prisma.payout.aggregate({
-      where: { userId, status: "success" },
-      _sum: { amount: true },
-    });
-    return Number(result._sum.amount || 0);
-  }
-
-  public async getPayoutHistory(userId: string, limit: number): Promise<any[]> {
-    return await prisma.payout.findMany({
-      where: { userId },
-      orderBy: { createdAt: "desc" },
-      take: limit,
-    });
   }
 }
